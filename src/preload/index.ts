@@ -1,9 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
-  importComics: (libraryId: number): Promise<{ imported: number; updated: number } | null> =>
-    ipcRenderer.invoke('import-comics', libraryId),
-
   onComicsUpdated: (callback: () => void): (() => void) => {
     const handler = (): void => callback()
     ipcRenderer.on('comics-updated', handler)
@@ -116,24 +113,43 @@ const api = {
   openFile: (filePath: string): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('open-file', filePath),
 
-  getImportDirectories: (): Promise<Array<{ id: number; path: string; library_id: number | null; library_name: string | null }>> =>
-    ipcRenderer.invoke('get-import-directories'),
-
-  refreshImportDirectory: (id: number): Promise<{ imported: number; updated: number } | null> =>
-    ipcRenderer.invoke('refresh-import-directory', id),
-
-  clearImportDirectory: (id: number): Promise<boolean> =>
-    ipcRenderer.invoke('clear-import-directory', id),
-
   onNavigateSettings: (callback: () => void): (() => void) => {
     const handler = (): void => callback()
     ipcRenderer.on('navigate-settings', handler)
     return () => ipcRenderer.removeListener('navigate-settings', handler)
   },
 
+  // Source APIs
+  getMissingSourcePaths: (libraryId: number): Promise<string[]> =>
+    ipcRenderer.invoke('get-missing-source-paths', libraryId),
+
+  pickSourceDirectory: (): Promise<string | null> =>
+    ipcRenderer.invoke('pick-source-directory'),
+
+  addSource: (path: string, libraryId: number): Promise<{ id: number; imported: number; updated: number }> =>
+    ipcRenderer.invoke('add-source', path, libraryId),
+
+  getLibrarySources: (libraryId: number): Promise<Array<{ id: number; path: string; type: string; library_id: number }>> =>
+    ipcRenderer.invoke('get-library-sources', libraryId),
+
+  checkLibrarySourcesExist: (libraryId: number): Promise<Array<{ id: number; path: string; type: string; library_id: number; exists: boolean }>> =>
+    ipcRenderer.invoke('check-library-sources-exist', libraryId),
+
+  checkAllSourcesExist: (): Promise<Array<{ id: number; path: string; type: string; library_id: number | null; exists: boolean }>> =>
+    ipcRenderer.invoke('check-all-sources-exist'),
+
+  updateSourcePath: (id: number): Promise<boolean> =>
+    ipcRenderer.invoke('update-source-path', id),
+
+  refreshSource: (id: number): Promise<{ imported: number; updated: number } | null> =>
+    ipcRenderer.invoke('refresh-source', id),
+
+  clearSource: (id: number): Promise<boolean> =>
+    ipcRenderer.invoke('clear-source', id),
+
   // Library APIs
-  createLibrary: (opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }): Promise<{ id: number }> =>
-    ipcRenderer.invoke('create-library', opts),
+  createLibrary: (opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }, sourcePaths?: string[]): Promise<{ id: number; sourceResults?: Array<{ path: string; imported: number; updated: number }> }> =>
+    ipcRenderer.invoke('create-library', opts, sourcePaths),
 
   pickLibraryImage: (): Promise<string | null> =>
     ipcRenderer.invoke('pick-library-image'),
@@ -158,12 +174,6 @@ const api = {
     const handler = (): void => callback()
     ipcRenderer.on('navigate-add-library', handler)
     return () => ipcRenderer.removeListener('navigate-add-library', handler)
-  },
-
-  onNavigateImport: (callback: () => void): (() => void) => {
-    const handler = (): void => callback()
-    ipcRenderer.on('navigate-import', handler)
-    return () => ipcRenderer.removeListener('navigate-import', handler)
   },
 
   clearAllData: (): Promise<void> =>

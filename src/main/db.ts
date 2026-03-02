@@ -1,61 +1,22 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
-import { join } from 'path'
+import { join, relative } from 'path'
 
 let db: Database.Database
 
-const migrations: string[] = [
-  // Migration 1: Initial schema
-  `
-  CREATE TABLE comic (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    author TEXT NOT NULL,
-    image_path TEXT,
-    directory TEXT NOT NULL UNIQUE
+const SCHEMA_VERSION = 2
+
+const SCHEMA = `
+  CREATE TABLE schema_version (
+    version INTEGER NOT NULL
   );
 
-  CREATE TABLE volume (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    comic_id INTEGER NOT NULL REFERENCES comic(id) ON DELETE CASCADE,
-    number INTEGER NOT NULL,
-    directory TEXT NOT NULL,
-    file TEXT,
-    UNIQUE(comic_id, number)
-  );
+  INSERT INTO schema_version (version) VALUES (${SCHEMA_VERSION});
 
-  CREATE TABLE chapter (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
-    number INTEGER NOT NULL,
-    type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
-    file TEXT NOT NULL,
-    UNIQUE(volume_id, number, type)
-  );
-  `,
-  // Migration 2: Add favorite column
-  `ALTER TABLE comic ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;`,
-  // Migration 3: Add mature column
-  `ALTER TABLE comic ADD COLUMN is_mature INTEGER NOT NULL DEFAULT 0;`,
-  // Migration 4: Rename is_mature to is_hidden + add settings table
-  `
-  ALTER TABLE comic RENAME COLUMN is_mature TO is_hidden;
-  CREATE TABLE IF NOT EXISTS settings (
+  CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
-  `,
-  // Migration 5: Import directory tracking
-  `
-  CREATE TABLE import_directory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT NOT NULL UNIQUE,
-    hidden INTEGER NOT NULL DEFAULT 0
-  );
-  `,
-  // Migration 6: Library system
-  `
-  PRAGMA foreign_keys = OFF;
 
   CREATE TABLE library (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,64 +28,113 @@ const migrations: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  ALTER TABLE import_directory ADD COLUMN library_id INTEGER REFERENCES library(id) ON DELETE SET NULL;
-  ALTER TABLE comic ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));
-  ALTER TABLE volume ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));
-  ALTER TABLE chapter ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'));
-
-  INSERT INTO library (name, description, media_type, is_hidden)
-    SELECT 'My Comics', 'Auto-created library for existing comics', 'comics', 0
-    WHERE EXISTS (SELECT 1 FROM comic LIMIT 1);
-
-  CREATE TABLE comic_new (
+  CREATE TABLE source (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL, author TEXT NOT NULL, image_path TEXT,
-    directory TEXT NOT NULL UNIQUE, favorite INTEGER NOT NULL DEFAULT 0,
+    path TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL DEFAULT 'directory',
+    library_id INTEGER REFERENCES library(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE comic (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    author TEXT NOT NULL,
+    image_path TEXT,
+    directory TEXT NOT NULL UNIQUE,
+    favorite INTEGER NOT NULL DEFAULT 0,
     library_id INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+    source_id INTEGER REFERENCES source(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  INSERT INTO comic_new (id, name, author, image_path, directory, favorite, library_id, created_at)
-    SELECT id, name, author, image_path, directory, favorite,
-      COALESCE((SELECT id FROM library LIMIT 1), 1), created_at FROM comic;
-  DROP TABLE comic;
-  ALTER TABLE comic_new RENAME TO comic;
 
-  UPDATE import_directory SET library_id = (SELECT id FROM library LIMIT 1)
-    WHERE library_id IS NULL AND EXISTS (SELECT 1 FROM library LIMIT 1);
+  CREATE TABLE volume (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comic_id INTEGER NOT NULL REFERENCES comic(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    directory TEXT NOT NULL,
+    file TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(comic_id, number)
+  );
 
-  PRAGMA foreign_keys = ON;
-  `
-]
+  CREATE TABLE chapter (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
+    file TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(volume_id, number, type)
+  );
+`
 
-function applyMigrations(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER NOT NULL
-    );
-  `)
+function migrateV1toV2(): void {
+  db.exec('ALTER TABLE comic ADD COLUMN source_id INTEGER REFERENCES source(id) ON DELETE CASCADE')
 
-  const row = database.prepare('SELECT version FROM schema_version').get() as
-    | { version: number }
-    | undefined
-  const currentVersion = row?.version ?? 0
+  const sources = db.prepare('SELECT id, path FROM source').all() as Array<{ id: number; path: string }>
 
-  for (let i = currentVersion; i < migrations.length; i++) {
-    database.exec(migrations[i])
+  for (const source of sources) {
+    const sourcePath = source.path.replace(/[/\\]+$/, '')
+
+    // Find comics belonging to this source
+    const comics = db.prepare("SELECT id, directory, image_path FROM comic WHERE directory LIKE ? ESCAPE '\\'").all(
+      sourcePath.replace(/[%_]/g, '\\$&') + '/%'
+    ) as Array<{ id: number; directory: string; image_path: string | null }>
+
+    for (const comic of comics) {
+      const relDir = relative(sourcePath, comic.directory)
+      const relImage = comic.image_path ? relative(sourcePath, comic.image_path) : null
+
+      db.prepare('UPDATE comic SET source_id = ?, directory = ?, image_path = ? WHERE id = ?').run(
+        source.id, relDir, relImage, comic.id
+      )
+
+      // Update volumes
+      const volumes = db.prepare('SELECT id, directory, file FROM volume WHERE comic_id = ?').all(comic.id) as Array<{ id: number; directory: string; file: string | null }>
+
+      for (const vol of volumes) {
+        const relVolDir = relative(sourcePath, vol.directory)
+        const relVolFile = vol.file ? relative(sourcePath, vol.file) : null
+        db.prepare('UPDATE volume SET directory = ?, file = ? WHERE id = ?').run(relVolDir, relVolFile, vol.id)
+
+        // Update chapters
+        const chapters = db.prepare('SELECT id, file FROM chapter WHERE volume_id = ?').all(vol.id) as Array<{ id: number; file: string }>
+
+        for (const ch of chapters) {
+          const relChFile = relative(sourcePath, ch.file)
+          db.prepare('UPDATE chapter SET file = ? WHERE id = ?').run(relChFile, ch.id)
+        }
+      }
+    }
   }
 
-  if (currentVersion === 0) {
-    database.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migrations.length)
-  } else if (currentVersion < migrations.length) {
-    database.prepare('UPDATE schema_version SET version = ?').run(migrations.length)
-  }
+  db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION)
 }
 
 export function initDb(): void {
   const dbPath = join(app.getPath('userData'), 'mindex.db')
+
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  applyMigrations(db)
+
+  const row = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+  ).get()
+
+  if (!row) {
+    db.exec(SCHEMA)
+  } else {
+    const versionRow = db.prepare('SELECT version FROM schema_version').get() as { version: number }
+    if (versionRow.version < SCHEMA_VERSION) {
+      const migrate = db.transaction(() => {
+        if (versionRow.version < 2) {
+          migrateV1toV2()
+        }
+      })
+      migrate()
+    }
+  }
 }
 
 export function getDb(): Database.Database {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import { api } from './lib/api'
 import { showStatus } from './components/StatusToast'
 import StatusToast from './components/StatusToast'
@@ -10,7 +10,6 @@ import EditLibraryPage from './pages/EditLibraryPage'
 import ComicDetailPage from './pages/ComicDetailPage'
 import VolumePage from './pages/VolumePage'
 import SettingsPage from './pages/SettingsPage'
-import LibrarySelectModal from './components/LibrarySelectModal'
 
 function useImportStatus(): void {
   useEffect(() => {
@@ -50,38 +49,6 @@ function NavigateAddLibraryListener(): React.JSX.Element | null {
   return null
 }
 
-function NavigateImportListener(): React.JSX.Element | null {
-  const location = useLocation()
-  const [showModal, setShowModal] = useState(false)
-
-  useEffect(() => {
-    return api.onNavigateImport(() => {
-      setShowModal(true)
-    })
-  }, [])
-
-  if (!showModal) return null
-
-  // Auto-detect current library from URL
-  const libraryMatch = location.pathname.match(/^\/library\/(\d+)/)
-  const defaultLibraryId = libraryMatch ? parseInt(libraryMatch[1], 10) : undefined
-
-  return (
-    <LibrarySelectModal
-      defaultLibraryId={defaultLibraryId}
-      onSelect={async (libraryId) => {
-        setShowModal(false)
-        const result = await api.importComics(libraryId)
-        if (result) {
-          const dismiss = showStatus(`Imported ${result.imported}, updated ${result.updated}`)
-          setTimeout(dismiss, 3000)
-        }
-      }}
-      onCancel={() => setShowModal(false)}
-    />
-  )
-}
-
 export default function App(): React.JSX.Element {
   useImportStatus()
 
@@ -89,7 +56,6 @@ export default function App(): React.JSX.Element {
     <HashRouter>
       <NavigateSettingsListener />
       <NavigateAddLibraryListener />
-      <NavigateImportListener />
       <Routes>
         <Route path="/" element={<LibrariesPage />} />
         <Route path="/library/new" element={<AddLibraryPage />} />

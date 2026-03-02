@@ -5,9 +5,10 @@ import type { LibraryWithCount } from '../types'
 
 interface LibraryCardProps {
   library: LibraryWithCount
+  sourceMissing?: boolean
 }
 
-export default function LibraryCard({ library }: LibraryCardProps): React.JSX.Element {
+export default function LibraryCard({ library, sourceMissing }: LibraryCardProps): React.JSX.Element {
   return (
     <Link
       to={`/library/${library.id}`}
@@ -17,9 +18,21 @@ export default function LibraryCard({ library }: LibraryCardProps): React.JSX.El
         <img
           src={library.image_path ? localFileUrl(library.image_path) : generateIdenticon(library.name)}
           alt={library.name}
-          className="w-full h-full object-cover"
+          className={`w-full h-full object-cover${sourceMissing ? ' grayscale opacity-50' : ''}`}
         />
         <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+          {sourceMissing && (
+            <Link
+              to={`/library/${library.id}/edit`}
+              onClick={(e) => e.stopPropagation()}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 transition-colors"
+              title="Sources cannot be found"
+            >
+              <svg className="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </Link>
+          )}
           {library.is_hidden === 1 && (
             <div className="w-8 h-8 flex items-center justify-center rounded-full bg-black/60">
               <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

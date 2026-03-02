@@ -9,11 +9,23 @@ export default function AddLibraryPage(): React.JSX.Element {
   const [mediaType] = useState('comics')
   const [imagePath, setImagePath] = useState<string | null>(null)
   const [isHidden, setIsHidden] = useState(false)
+  const [sourcePaths, setSourcePaths] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
 
   const handlePickImage = async (): Promise<void> => {
     const path = await api.pickLibraryImage()
     if (path) setImagePath(path)
+  }
+
+  const handleAddSource = async (): Promise<void> => {
+    const path = await api.pickSourceDirectory()
+    if (path && !sourcePaths.includes(path)) {
+      setSourcePaths((prev) => [...prev, path])
+    }
+  }
+
+  const handleRemoveSource = (path: string): void => {
+    setSourcePaths((prev) => prev.filter((p) => p !== path))
   }
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
@@ -22,13 +34,16 @@ export default function AddLibraryPage(): React.JSX.Element {
 
     setSubmitting(true)
     try {
-      const result = await api.createLibrary({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        mediaType,
-        imagePath: imagePath ?? undefined,
-        isHidden
-      })
+      const result = await api.createLibrary(
+        {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          mediaType,
+          imagePath: imagePath ?? undefined,
+          isHidden
+        },
+        sourcePaths.length > 0 ? sourcePaths : undefined
+      )
       navigate(`/library/${result.id}`)
     } finally {
       setSubmitting(false)
@@ -109,6 +124,36 @@ export default function AddLibraryPage(): React.JSX.Element {
             </div>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium mb-1">Sources</label>
+            {sourcePaths.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {sourcePaths.map((path) => (
+                  <div
+                    key={path}
+                    className="flex items-center justify-between p-2 rounded-md border border-[var(--border)] bg-[var(--card)]"
+                  >
+                    <p className="text-sm font-mono truncate mr-3" title={path}>{path}</p>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSource(path)}
+                      className="shrink-0 text-sm text-[var(--muted-foreground)] hover:text-red-500 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleAddSource}
+              className="px-3 py-2 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+            >
+              Add Directory
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -126,7 +171,7 @@ export default function AddLibraryPage(): React.JSX.Element {
               disabled={!name.trim() || submitting}
               className="px-4 py-2 text-sm rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {submitting ? 'Creating...' : 'Create Library'}
+              {submitting ? (sourcePaths.length > 0 ? 'Creating & Importing...' : 'Creating...') : 'Create Library'}
             </button>
             <Link
               to="/"

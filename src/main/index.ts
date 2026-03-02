@@ -33,14 +33,6 @@ function buildMenu(): void {
             if (win) win.webContents.send('navigate-add-library')
           }
         },
-        {
-          label: 'Import Media...',
-          accelerator: 'CmdOrCtrl+I',
-          click: (): void => {
-            const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-            if (win) win.webContents.send('navigate-import')
-          }
-        },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
       ]

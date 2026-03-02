@@ -21,9 +21,11 @@ export default function LibraryComicsPage(): React.JSX.Element {
   const [page, setPage] = useState(savedPages[libraryId] ?? 1)
   const [search, setSearch] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [missingSourcePaths, setMissingSourcePaths] = useState<string[]>([])
 
   useEffect(() => {
     api.getLibrary(libraryId).then(setLibrary)
+    api.getMissingSourcePaths(libraryId).then(setMissingSourcePaths)
   }, [libraryId])
 
   useEffect(() => {
@@ -68,6 +70,14 @@ export default function LibraryComicsPage(): React.JSX.Element {
       navigate(`/comic/${result.id}`)
     }
   }
+
+  const isComicSourceMissing = useCallback(
+    (comic: Comic): boolean =>
+      missingSourcePaths.some(
+        (p) => comic.directory === p || comic.directory.startsWith(p + '/') || comic.directory.startsWith(p + '\\')
+      ),
+    [missingSourcePaths]
+  )
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
@@ -127,13 +137,13 @@ export default function LibraryComicsPage(): React.JSX.Element {
               ? 'No comics found matching your search.'
               : favoritesOnly
                 ? 'No favourited comics in this library.'
-                : 'No comics in this library yet. Use File \u2192 Import Media to add some.'}
+                : 'No comics in this library yet. Edit this library to add sources.'}
           </div>
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
               {comics.map((comic) => (
-                <ComicCard key={comic.id} comic={comic} onFavoriteToggle={handleFavoriteToggle} />
+                <ComicCard key={comic.id} comic={comic} onFavoriteToggle={handleFavoriteToggle} sourceMissing={isComicSourceMissing(comic)} libraryId={libraryId} />
               ))}
             </div>
             <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />

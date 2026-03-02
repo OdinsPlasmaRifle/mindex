@@ -1,7 +1,7 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { getDb } from './db'
-import { readdirSync, statSync } from 'fs'
-import { join, basename, extname } from 'path'
+import { readdirSync, existsSync } from 'fs'
+import { join, basename, extname, relative } from 'path'
 
 let onMenuRebuild: (() => void) | null = null
 export function setMenuRebuildCallback(cb: () => void): void {
@@ -34,46 +34,60 @@ function isImageFile(name: string): boolean {
   return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(ext)
 }
 
-function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { name: string; author: string }, libraryId: number): 'imported' | 'updated' {
+function resolveSourcePath(sourcePath: string, relativePath: string | null): string | null {
+  if (!relativePath) return null
+  return join(sourcePath, relativePath)
+}
+
+function scanComicDir(
+  db: ReturnType<typeof getDb>,
+  comicDir: string,
+  parsed: { name: string; author: string },
+  libraryId: number,
+  sourceRoot: string,
+  sourceId: number
+): 'imported' | 'updated' {
+  const relBase = relative(sourceRoot, comicDir)
+
   // Find icon/cover image
-  let imagePath: string | null = null
+  let relImagePath: string | null = null
   const comicFiles = readdirSync(comicDir, { withFileTypes: true })
   for (const f of comicFiles) {
     if (f.isFile() && isImageFile(f.name)) {
-      // Prefer files with 'icon' or 'cover' in the name, otherwise use first image
       if (f.name.toLowerCase().includes('icon') || f.name.toLowerCase().includes('cover')) {
-        imagePath = join(comicDir, f.name)
+        relImagePath = join(relBase, f.name)
         break
       }
-      if (!imagePath) {
-        imagePath = join(comicDir, f.name)
+      if (!relImagePath) {
+        relImagePath = join(relBase, f.name)
       }
     }
   }
 
-  // Upsert comic: match by directory first, then by name+author to prevent duplicates
+  // Upsert comic: match by directory+source_id first, then by name+author to prevent duplicates
   const existing = (
-    db.prepare('SELECT id FROM comic WHERE directory = ?').get(comicDir) ??
+    db.prepare('SELECT id FROM comic WHERE directory = ? AND source_id = ?').get(relBase, sourceId) ??
     db.prepare('SELECT id FROM comic WHERE name = ? AND author = ?').get(parsed.name, parsed.author)
   ) as { id: number } | undefined
 
   let comicId: number
   let result: 'imported' | 'updated'
   if (existing) {
-    db.prepare('UPDATE comic SET name = ?, author = ?, image_path = ?, directory = ?, library_id = ? WHERE id = ?').run(
+    db.prepare('UPDATE comic SET name = ?, author = ?, image_path = ?, directory = ?, library_id = ?, source_id = ? WHERE id = ?').run(
       parsed.name,
       parsed.author,
-      imagePath,
-      comicDir,
+      relImagePath,
+      relBase,
       libraryId,
+      sourceId,
       existing.id
     )
     comicId = existing.id
     result = 'updated'
   } else {
     const ins = db
-      .prepare('INSERT INTO comic (name, author, image_path, directory, library_id) VALUES (?, ?, ?, ?, ?)')
-      .run(parsed.name, parsed.author, imagePath, comicDir, libraryId)
+      .prepare('INSERT INTO comic (name, author, image_path, directory, library_id, source_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(parsed.name, parsed.author, relImagePath, relBase, libraryId, sourceId)
     comicId = ins.lastInsertRowid as number
     result = 'imported'
   }
@@ -85,9 +99,10 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
     if (volNum === null) continue
 
     const volDir = join(comicDir, volEntry.name)
+    const relVolDir = join(relBase, volEntry.name)
 
     // Find volume cbz file
-    let volumeFile: string | null = null
+    let relVolumeFile: string | null = null
     const volFiles = readdirSync(volDir, { withFileTypes: true })
     for (const f of volFiles) {
       if (
@@ -97,7 +112,7 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
         !/Ch\./i.test(f.name) &&
         !/Extra/i.test(f.name)
       ) {
-        volumeFile = join(volDir, f.name)
+        relVolumeFile = join(relVolDir, f.name)
         break
       }
     }
@@ -110,8 +125,8 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
     let volumeId: number
     if (existingVol) {
       db.prepare('UPDATE volume SET directory = ?, file = ? WHERE id = ?').run(
-        volDir,
-        volumeFile,
+        relVolDir,
+        relVolumeFile,
         existingVol.id
       )
       volumeId = existingVol.id
@@ -120,7 +135,7 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
     } else {
       const ins = db
         .prepare('INSERT INTO volume (comic_id, number, directory, file) VALUES (?, ?, ?, ?)')
-        .run(comicId, volNum, volDir, volumeFile)
+        .run(comicId, volNum, relVolDir, relVolumeFile)
       volumeId = ins.lastInsertRowid as number
     }
 
@@ -128,7 +143,7 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
     for (const f of volFiles) {
       if (!f.isFile() || !f.name.endsWith('.cbz')) continue
       // Skip the volume file itself
-      if (volumeFile && join(volDir, f.name) === volumeFile) continue
+      if (relVolumeFile && join(relVolDir, f.name) === relVolumeFile) continue
 
       const chapterInfo = parseChapterNumber(f.name)
       if (!chapterInfo) continue
@@ -137,7 +152,7 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
         volumeId,
         chapterInfo.number,
         chapterInfo.type,
-        join(volDir, f.name)
+        join(relVolDir, f.name)
       )
     }
   }
@@ -145,10 +160,18 @@ function scanComicDir(db: ReturnType<typeof getDb>, comicDir: string, parsed: { 
   return result
 }
 
-function importDirectory(rootDir: string, libraryId: number): { imported: number; updated: number } {
+function importSource(rootDir: string, libraryId: number): { imported: number; updated: number } {
   const db = getDb()
   let imported = 0
   let updated = 0
+
+  // Upsert source first to get its ID
+  db.prepare(
+    'INSERT INTO source (path, library_id) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET library_id = excluded.library_id'
+  ).run(rootDir, libraryId)
+
+  const sourceRow = db.prepare('SELECT id FROM source WHERE path = ?').get(rootDir) as { id: number }
+  const sourceId = sourceRow.id
 
   const entries = readdirSync(rootDir, { withFileTypes: true })
 
@@ -159,7 +182,7 @@ function importDirectory(rootDir: string, libraryId: number): { imported: number
       const parsed = parseComicFolder(entry.name)
       if (!parsed) continue
 
-      const result = scanComicDir(db, join(rootDir, entry.name), parsed, libraryId)
+      const result = scanComicDir(db, join(rootDir, entry.name), parsed, libraryId, rootDir, sourceId)
       if (result === 'imported') imported++
       else updated++
     }
@@ -167,27 +190,25 @@ function importDirectory(rootDir: string, libraryId: number): { imported: number
 
   transaction()
 
-  // Track the import directory
-  db.prepare(
-    'INSERT INTO import_directory (path, library_id) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET library_id = excluded.library_id'
-  ).run(rootDir, libraryId)
-
   return { imported, updated }
 }
 
 function refreshComic(comicId: number): boolean {
   const db = getDb()
 
-  const comic = db.prepare('SELECT id, directory, library_id FROM comic WHERE id = ?').get(comicId) as
-    | { id: number; directory: string; library_id: number }
+  const comic = db.prepare(
+    'SELECT c.id, c.directory, c.library_id, c.source_id, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id WHERE c.id = ?'
+  ).get(comicId) as
+    | { id: number; directory: string; library_id: number; source_id: number | null; source_path: string | null }
     | undefined
-  if (!comic) return false
+  if (!comic || !comic.source_id || !comic.source_path) return false
 
-  const parsed = parseComicFolder(basename(comic.directory))
+  const fullDir = join(comic.source_path, comic.directory)
+  const parsed = parseComicFolder(basename(fullDir))
   if (!parsed) return false
 
   const transaction = db.transaction(() => {
-    scanComicDir(db, comic.directory, parsed, comic.library_id)
+    scanComicDir(db, fullDir, parsed, comic.library_id, comic.source_path!, comic.source_id!)
   })
 
   transaction()
@@ -199,55 +220,87 @@ export function clearAllData(): void {
   db.exec('DELETE FROM chapter')
   db.exec('DELETE FROM volume')
   db.exec('DELETE FROM comic')
-  db.exec('DELETE FROM import_directory')
+  db.exec('DELETE FROM source')
   db.exec('DELETE FROM library')
   db.exec("DELETE FROM settings")
 }
 
-export function getImportDirectories(): Array<{ id: number; path: string; library_id: number | null; library_name: string | null }> {
+export function getLibrarySources(libraryId: number): Array<{ id: number; path: string; type: string; library_id: number }> {
   const db = getDb()
   return db.prepare(
-    'SELECT d.id, d.path, d.library_id, l.name as library_name FROM import_directory d LEFT JOIN library l ON d.library_id = l.id ORDER BY d.path ASC'
-  ).all() as Array<{
-    id: number
-    path: string
-    library_id: number | null
-    library_name: string | null
-  }>
+    'SELECT id, path, type, library_id FROM source WHERE library_id = ? ORDER BY path ASC'
+  ).all(libraryId) as Array<{ id: number; path: string; type: string; library_id: number }>
 }
 
-export function refreshImportDirectory(id: number): { imported: number; updated: number } | null {
-  const db = getDb()
-  const row = db.prepare('SELECT path, library_id FROM import_directory WHERE id = ?').get(id) as
-    | { path: string; library_id: number | null }
-    | undefined
-  if (!row || !row.library_id) return null
-  return importDirectory(row.path, row.library_id)
+export function checkLibrarySourcesExist(libraryId: number): Array<{ id: number; path: string; type: string; library_id: number; exists: boolean }> {
+  const sources = getLibrarySources(libraryId)
+  return sources.map((s) => ({ ...s, exists: existsSync(s.path) }))
 }
 
-export function clearImportDirectory(id: number): boolean {
+export function checkAllSourcesExist(): Array<{ id: number; path: string; type: string; library_id: number | null; exists: boolean }> {
   const db = getDb()
-  const row = db.prepare('SELECT path, library_id FROM import_directory WHERE id = ?').get(id) as
-    | { path: string; library_id: number | null }
+  const sources = db.prepare(
+    'SELECT id, path, type, library_id FROM source ORDER BY path ASC'
+  ).all() as Array<{ id: number; path: string; type: string; library_id: number | null }>
+  return sources.map((s) => ({ ...s, exists: existsSync(s.path) }))
+}
+
+export function updateSourcePath(id: number, newPath: string): boolean {
+  const db = getDb()
+  const row = db.prepare('SELECT id FROM source WHERE id = ?').get(id) as
+    | { id: number }
     | undefined
   if (!row) return false
 
-  // Normalize: strip trailing slashes for consistent matching
-  const normalized = row.path.replace(/[/\\]+$/, '')
+  db.prepare('UPDATE source SET path = ? WHERE id = ?').run(newPath, id)
+  return true
+}
+
+export function refreshSource(id: number): { imported: number; updated: number } | null {
+  const db = getDb()
+  const row = db.prepare('SELECT path, library_id FROM source WHERE id = ?').get(id) as
+    | { path: string; library_id: number | null }
+    | undefined
+  if (!row || !row.library_id) return null
+  return importSource(row.path, row.library_id)
+}
+
+export function clearSource(id: number): boolean {
+  const db = getDb()
+  const row = db.prepare('SELECT id FROM source WHERE id = ?').get(id) as
+    | { id: number }
+    | undefined
+  if (!row) return false
 
   const transaction = db.transaction(() => {
-    // Delete comics whose directory is under this import path
-    db.prepare("DELETE FROM comic WHERE directory LIKE ? ESCAPE '\\'").run(
-      normalized.replace(/[%_]/g, '\\$&') + '/%'
-    )
-    db.prepare('DELETE FROM import_directory WHERE id = ?').run(id)
+    db.prepare('DELETE FROM comic WHERE source_id = ?').run(id)
+    db.prepare('DELETE FROM source WHERE id = ?').run(id)
   })
 
   transaction()
   return true
 }
 
-export function createLibrary(opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }): { id: number } {
+export function addSource(path: string, libraryId: number): { id: number; imported: number; updated: number } {
+  const result = importSource(path, libraryId)
+  const db = getDb()
+  const row = db.prepare('SELECT id FROM source WHERE path = ?').get(path) as { id: number }
+  return { id: row.id, ...result }
+}
+
+export async function pickSourceDirectory(win: BrowserWindow): Promise<string | null> {
+  const result = await dialog.showOpenDialog(win, {
+    properties: ['openDirectory'],
+    title: 'Select Source Directory'
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+}
+
+export function createLibrary(
+  opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean },
+  sourcePaths?: string[]
+): { id: number; sourceResults?: Array<{ path: string; imported: number; updated: number }> } {
   const db = getDb()
   const ins = db.prepare(
     'INSERT INTO library (name, description, media_type, image_path, is_hidden) VALUES (?, ?, ?, ?, ?)'
@@ -258,7 +311,17 @@ export function createLibrary(opts: { name: string; description?: string; mediaT
     opts.imagePath ?? null,
     opts.isHidden ? 1 : 0
   )
-  return { id: ins.lastInsertRowid as number }
+  const id = ins.lastInsertRowid as number
+
+  if (sourcePaths && sourcePaths.length > 0) {
+    const sourceResults = sourcePaths.map((path) => {
+      const result = importSource(path, id)
+      return { path, ...result }
+    })
+    return { id, sourceResults }
+  }
+
+  return { id }
 }
 
 export function getLibraries(search?: string, hiddenFilter: 'hide' | 'include' | 'only' = 'hide'): Array<Record<string, unknown>> {
@@ -334,22 +397,6 @@ export async function pickLibraryImage(win: BrowserWindow): Promise<string | nul
   return result.filePaths[0]
 }
 
-export async function triggerImportToLibrary(
-  win: BrowserWindow,
-  libraryId: number
-): Promise<{ imported: number; updated: number } | null> {
-  const result = await dialog.showOpenDialog(win, {
-    properties: ['openDirectory'],
-    title: 'Select Comics Directory'
-  })
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return null
-  }
-
-  return importDirectory(result.filePaths[0], libraryId)
-}
-
 export function getHiddenContentEnabled(): boolean {
   const db = getDb()
   const row = db.prepare("SELECT value FROM settings WHERE key = 'hidden_content_enabled'").get() as
@@ -365,53 +412,56 @@ export function setHiddenContentEnabled(enabled: boolean): void {
   ).run(enabled ? '1' : '0')
 }
 
-export function registerIpcHandlers(): void {
-  ipcMain.handle('import-comics', async (event, libraryId: number) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { imported: 0, updated: 0 }
-    event.sender.send('import-started')
-    try {
-      const result = await triggerImportToLibrary(win, libraryId)
-      if (result) {
-        event.sender.send('comics-updated')
-      }
-      return result
-    } finally {
-      event.sender.send('import-finished')
-    }
-  })
+export function getMissingSourcePaths(libraryId: number): string[] {
+  const sources = getLibrarySources(libraryId)
+  return sources.filter((s) => !existsSync(s.path)).map((s) => s.path)
+}
 
+export function registerIpcHandlers(): void {
   ipcMain.handle(
     'get-comics',
     (_event, libraryId: number, page: number, search: string, pageSize: number = 20, favoritesOnly: boolean = false) => {
       const db = getDb()
       const offset = (page - 1) * pageSize
 
-      const conditions: string[] = ['library_id = ?']
+      const conditions: string[] = ['c.library_id = ?']
       const params: unknown[] = [libraryId]
 
       if (search) {
-        conditions.push('(name LIKE ? OR author LIKE ?)')
+        conditions.push('(c.name LIKE ? OR c.author LIKE ?)')
         const term = `%${search}%`
         params.push(term, term)
       }
 
       if (favoritesOnly) {
-        conditions.push('favorite = 1')
+        conditions.push('c.favorite = 1')
       }
 
       const whereClause = 'WHERE ' + conditions.join(' AND ')
 
       const countRow = db
-        .prepare(`SELECT COUNT(*) as total FROM comic ${whereClause}`)
+        .prepare(`SELECT COUNT(*) as total FROM comic c ${whereClause}`)
         .get(...params) as { total: number }
 
       params.push(pageSize, offset)
       const comics = db
-        .prepare(`SELECT * FROM comic ${whereClause} ORDER BY name ASC LIMIT ? OFFSET ?`)
-        .all(...params)
+        .prepare(
+          `SELECT c.*, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id ${whereClause} ORDER BY c.name ASC LIMIT ? OFFSET ?`
+        )
+        .all(...params) as Array<Record<string, unknown>>
 
-      return { comics, total: countRow.total, page, pageSize }
+      // Resolve relative paths to absolute
+      const resolved = comics.map((comic) => {
+        const sourcePath = comic.source_path as string | null
+        delete comic.source_path
+        if (sourcePath) {
+          comic.directory = resolveSourcePath(sourcePath, comic.directory as string)
+          comic.image_path = resolveSourcePath(sourcePath, comic.image_path as string | null)
+        }
+        return comic
+      })
+
+      return { comics: resolved, total: countRow.total, page, pageSize }
     }
   )
 
@@ -422,18 +472,40 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-comic', (_event, id: number) => {
     const db = getDb()
-    const comic = db.prepare('SELECT * FROM comic WHERE id = ?').get(id)
+    const comic = db.prepare(
+      'SELECT c.*, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id WHERE c.id = ?'
+    ).get(id) as Record<string, unknown> | undefined
     if (!comic) return null
+
+    const sourcePath = comic.source_path as string | null
+    delete comic.source_path
+    if (sourcePath) {
+      comic.directory = resolveSourcePath(sourcePath, comic.directory as string)
+      comic.image_path = resolveSourcePath(sourcePath, comic.image_path as string | null)
+    }
 
     const volumes = db
       .prepare('SELECT * FROM volume WHERE comic_id = ? ORDER BY number ASC')
       .all(id) as Array<Record<string, unknown>>
 
     const volumesWithChapters = volumes.map((vol) => {
+      if (sourcePath) {
+        vol.directory = resolveSourcePath(sourcePath, vol.directory as string)!
+        vol.file = resolveSourcePath(sourcePath, vol.file as string | null)
+      }
+
       const chapters = db
         .prepare('SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC')
-        .all(vol.id)
-      return { ...vol, chapters }
+        .all(vol.id) as Array<Record<string, unknown>>
+
+      const resolvedChapters = chapters.map((ch) => {
+        if (sourcePath) {
+          ch.file = resolveSourcePath(sourcePath, ch.file as string)!
+        }
+        return ch
+      })
+
+      return { ...vol, chapters: resolvedChapters }
     })
 
     return { ...comic, volumes: volumesWithChapters }
@@ -441,16 +513,32 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-volume', (_event, id: number) => {
     const db = getDb()
-    const volume = db.prepare('SELECT * FROM volume WHERE id = ?').get(id)
+    const volume = db.prepare(
+      'SELECT v.*, s.path as source_path FROM volume v JOIN comic c ON c.id = v.comic_id LEFT JOIN source s ON s.id = c.source_id WHERE v.id = ?'
+    ).get(id) as Record<string, unknown> | undefined
     if (!volume) return null
+
+    const sourcePath = volume.source_path as string | null
+    delete volume.source_path
+    if (sourcePath) {
+      volume.directory = resolveSourcePath(sourcePath, volume.directory as string)!
+      volume.file = resolveSourcePath(sourcePath, volume.file as string | null)
+    }
 
     const chapters = db
       .prepare(
         "SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC"
       )
-      .all(id)
+      .all(id) as Array<Record<string, unknown>>
 
-    return { ...volume, chapters }
+    const resolvedChapters = chapters.map((ch) => {
+      if (sourcePath) {
+        ch.file = resolveSourcePath(sourcePath, ch.file as string)!
+      }
+      return ch
+    })
+
+    return { ...volume, chapters: resolvedChapters }
   })
 
   ipcMain.handle('refresh-comic', (_event, id: number) => {
@@ -489,20 +577,63 @@ export function registerIpcHandlers(): void {
     if (onMenuRebuild) onMenuRebuild()
   })
 
-  ipcMain.handle('get-import-directories', () => {
-    return getImportDirectories()
+  ipcMain.handle('get-missing-source-paths', (_event, libraryId: number) => {
+    return getMissingSourcePaths(libraryId)
   })
 
-  ipcMain.handle('refresh-import-directory', (event, id: number) => {
-    const result = refreshImportDirectory(id)
+  // Source handlers
+  ipcMain.handle('pick-source-directory', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return null
+    return pickSourceDirectory(win)
+  })
+
+  ipcMain.handle('add-source', (event, path: string, libraryId: number) => {
+    const result = addSource(path, libraryId)
+    event.sender.send('comics-updated')
+    return result
+  })
+
+  ipcMain.handle('get-library-sources', (_event, libraryId: number) => {
+    return getLibrarySources(libraryId)
+  })
+
+  ipcMain.handle('check-library-sources-exist', (_event, libraryId: number) => {
+    return checkLibrarySourcesExist(libraryId)
+  })
+
+  ipcMain.handle('check-all-sources-exist', () => {
+    return checkAllSourcesExist()
+  })
+
+  ipcMain.handle('update-source-path', async (event, id: number) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: 'Select New Directory Location'
+    })
+
+    if (result.canceled || result.filePaths.length === 0) return false
+
+    const success = updateSourcePath(id, result.filePaths[0])
+    if (success) {
+      event.sender.send('comics-updated')
+    }
+    return success
+  })
+
+  ipcMain.handle('refresh-source', (event, id: number) => {
+    const result = refreshSource(id)
     if (result) {
       event.sender.send('comics-updated')
     }
     return result
   })
 
-  ipcMain.handle('clear-import-directory', (event, id: number) => {
-    const result = clearImportDirectory(id)
+  ipcMain.handle('clear-source', (event, id: number) => {
+    const result = clearSource(id)
     if (result) {
       event.sender.send('comics-updated')
     }
@@ -510,8 +641,8 @@ export function registerIpcHandlers(): void {
   })
 
   // Library handlers
-  ipcMain.handle('create-library', (_event, opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }) => {
-    return createLibrary(opts)
+  ipcMain.handle('create-library', (_event, opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }, sourcePaths?: string[]) => {
+    return createLibrary(opts, sourcePaths)
   })
 
   ipcMain.handle('pick-library-image', async (event) => {

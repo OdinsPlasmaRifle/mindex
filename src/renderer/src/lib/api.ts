@@ -1,9 +1,8 @@
-import type { ComicsPage, ComicWithVolumes, VolumeWithChapters, LibraryWithCount } from '../types'
+import type { ComicsPage, ComicWithVolumes, VolumeWithChapters, LibraryWithCount, Source, SourceWithStatus } from '../types'
 
 declare global {
   interface Window {
     api: {
-      importComics(libraryId: number): Promise<{ imported: number; updated: number } | null>
       onComicsUpdated(callback: () => void): () => void
       onImportStarted(callback: () => void): () => void
       onImportFinished(callback: () => void): () => void
@@ -17,18 +16,23 @@ declare global {
       onHiddenContentToggled(callback: (enabled: boolean) => void): () => void
       getHiddenContentEnabled(): Promise<boolean>
       setHiddenContentEnabled(enabled: boolean): Promise<void>
-      getImportDirectories(): Promise<Array<{ id: number; path: string; library_id: number | null; library_name: string | null }>>
-      refreshImportDirectory(id: number): Promise<{ imported: number; updated: number } | null>
-      clearImportDirectory(id: number): Promise<boolean>
       onNavigateSettings(callback: () => void): () => void
-      createLibrary(opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }): Promise<{ id: number }>
+      getMissingSourcePaths(libraryId: number): Promise<string[]>
+      pickSourceDirectory(): Promise<string | null>
+      addSource(path: string, libraryId: number): Promise<{ id: number; imported: number; updated: number }>
+      getLibrarySources(libraryId: number): Promise<Source[]>
+      checkLibrarySourcesExist(libraryId: number): Promise<SourceWithStatus[]>
+      checkAllSourcesExist(): Promise<Array<SourceWithStatus & { library_id: number | null }>>
+      updateSourcePath(id: number): Promise<boolean>
+      refreshSource(id: number): Promise<{ imported: number; updated: number } | null>
+      clearSource(id: number): Promise<boolean>
+      createLibrary(opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }, sourcePaths?: string[]): Promise<{ id: number; sourceResults?: Array<{ path: string; imported: number; updated: number }> }>
       pickLibraryImage(): Promise<string | null>
       getLibraries(search?: string, hiddenFilter?: 'hide' | 'include' | 'only'): Promise<LibraryWithCount[]>
       getLibrary(id: number): Promise<LibraryWithCount | null>
       updateLibrary(id: number, opts: { name?: string; description?: string; imagePath?: string | null; isHidden?: boolean }): Promise<boolean>
       deleteLibrary(id: number): Promise<boolean>
       onNavigateAddLibrary(callback: () => void): () => void
-      onNavigateImport(callback: () => void): () => void
       clearAllData(): Promise<void>
     }
   }

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, localFileUrl } from '../lib/api'
-import type { LibraryWithCount } from '../types'
+import { showStatus } from '../components/StatusToast'
+import type { LibraryWithCount, SourceWithStatus } from '../types'
 
 export default function EditLibraryPage(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -16,6 +17,16 @@ export default function EditLibraryPage(): React.JSX.Element {
   const [isHidden, setIsHidden] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  const [sources, setSources] = useState<SourceWithStatus[]>([])
+  const [refreshingSourceId, setRefreshingSourceId] = useState<number | null>(null)
+  const [clearingSourceId, setClearingSourceId] = useState<number | null>(null)
+  const [addingSource, setAddingSource] = useState(false)
+
+  const loadSources = async (): Promise<void> => {
+    const result = await api.checkLibrarySourcesExist(libraryId)
+    setSources(result)
+  }
+
   useEffect(() => {
     api.getLibrary(libraryId).then((lib) => {
       setLibrary(lib)
@@ -27,11 +38,56 @@ export default function EditLibraryPage(): React.JSX.Element {
       }
       setLoading(false)
     })
+    loadSources()
   }, [libraryId])
 
   const handlePickImage = async (): Promise<void> => {
     const path = await api.pickLibraryImage()
     if (path) setImagePath(path)
+  }
+
+  const handleAddSource = async (): Promise<void> => {
+    const path = await api.pickSourceDirectory()
+    if (!path) return
+
+    setAddingSource(true)
+    try {
+      const result = await api.addSource(path, libraryId)
+      const dismiss = showStatus(`Imported ${result.imported}, updated ${result.updated}`)
+      setTimeout(dismiss, 3000)
+      await loadSources()
+    } finally {
+      setAddingSource(false)
+    }
+  }
+
+  const handleRefreshSource = async (sourceId: number): Promise<void> => {
+    setRefreshingSourceId(sourceId)
+    try {
+      const result = await api.refreshSource(sourceId)
+      if (result) {
+        const dismiss = showStatus(`Refreshed: ${result.imported} imported, ${result.updated} updated`)
+        setTimeout(dismiss, 3000)
+      }
+      await loadSources()
+    } finally {
+      setRefreshingSourceId(null)
+    }
+  }
+
+  const handleClearSource = async (sourceId: number): Promise<void> => {
+    await api.clearSource(sourceId)
+    setClearingSourceId(null)
+    await loadSources()
+  }
+
+  const handleUpdateSource = async (sourceId: number): Promise<void> => {
+    const success = await api.updateSourcePath(sourceId)
+    if (success) {
+      const dismiss = showStatus('Source path updated')
+      setTimeout(dismiss, 3000)
+      await loadSources()
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
@@ -140,6 +196,87 @@ export default function EditLibraryPage(): React.JSX.Element {
                 </button>
               )}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Sources</label>
+            {sources.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {sources.map((source) => (
+                  <div
+                    key={source.id}
+                    className="p-3 rounded-md border border-[var(--border)] bg-[var(--card)]"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm font-mono truncate flex-1" title={source.path}>{source.path}</p>
+                      {!source.exists && (
+                        <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-500/20 text-red-400">
+                          Not found
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {clearingSourceId === source.id ? (
+                        <>
+                          <span className="text-sm text-[var(--muted-foreground)]">
+                            Clear all comics from this source?
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleClearSource(source.id)}
+                            className="px-3 py-1 text-sm rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setClearingSourceId(null)}
+                            className="px-3 py-1 text-sm rounded-md bg-[var(--secondary)] hover:bg-[var(--secondary)]/80 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSource(source.id)}
+                            disabled={refreshingSourceId !== null || clearingSourceId !== null}
+                            className="px-3 py-1 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] disabled:opacity-50 transition-colors"
+                          >
+                            Update
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRefreshSource(source.id)}
+                            disabled={refreshingSourceId !== null || clearingSourceId !== null || !source.exists}
+                            className="px-3 py-1 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] disabled:opacity-50 transition-colors"
+                          >
+                            {refreshingSourceId === source.id ? 'Refreshing...' : 'Refresh'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setClearingSourceId(source.id)}
+                            disabled={refreshingSourceId !== null || clearingSourceId !== null}
+                            className="px-3 py-1 text-sm rounded-md border border-[var(--border)] text-red-500 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                          >
+                            Clear
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleAddSource}
+              disabled={addingSource}
+              className="px-3 py-2 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] disabled:opacity-50 transition-colors"
+            >
+              {addingSource ? 'Adding...' : 'Add Source'}
+            </button>
           </div>
 
           <div className="flex items-center gap-2">

@@ -11,6 +11,7 @@ export default function LibrariesPage(): React.JSX.Element {
   const [search, setSearch] = useState('')
   const [hiddenEnabled, setHiddenEnabled] = useState(false)
   const [hiddenFilter, setHiddenFilter] = useState<'hide' | 'include' | 'only'>(savedHiddenFilter)
+  const [missingSourceLibraryIds, setMissingSourceLibraryIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     api.getHiddenContentEnabled().then(setHiddenEnabled)
@@ -31,6 +32,15 @@ export default function LibrariesPage(): React.JSX.Element {
   const loadLibraries = useCallback(async () => {
     const result = await api.getLibraries(search || undefined, activeHiddenFilter)
     setLibraries(result)
+
+    const sources = await api.checkAllSourcesExist()
+    const missing = new Set<number>()
+    for (const source of sources) {
+      if (!source.exists && source.library_id !== null) {
+        missing.add(source.library_id)
+      }
+    }
+    setMissingSourceLibraryIds(missing)
   }, [search, activeHiddenFilter])
 
   useEffect(() => {
@@ -80,7 +90,7 @@ export default function LibrariesPage(): React.JSX.Element {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
             {libraries.map((library) => (
-              <LibraryCard key={library.id} library={library} />
+              <LibraryCard key={library.id} library={library} sourceMissing={missingSourceLibraryIds.has(library.id)} />
             ))}
           </div>
         )}

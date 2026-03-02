@@ -55,3 +55,14 @@ export interface ComicsPage {
   page: number
   pageSize: number
 }
+
+export interface Source {
+  id: number
+  path: string
+  type: string
+  library_id: number
+}
+
+export interface SourceWithStatus extends Source {
+  exists: boolean
+}
