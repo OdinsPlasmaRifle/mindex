@@ -4,14 +4,45 @@ import { api, localFileUrl } from '../lib/api'
 import { showStatus } from '../components/StatusToast'
 import type { ComicWithVolumes, VolumeWithChapters } from '../types'
 
+function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }): React.JSX.Element {
+  return (
+    <svg
+      className="w-4 h-4 cursor-pointer hover:opacity-75 transition-opacity"
+      viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={2}
+      onClick={onClick}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+    </svg>
+  )
+}
+
 function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters; defaultOpen?: boolean }): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
+  const [volFavorite, setVolFavorite] = useState(vol.favorite)
+  const [chapterFavorites, setChapterFavorites] = useState<Record<number, number>>(
+    () => Object.fromEntries(vol.chapters.map((ch) => [ch.id, ch.favorite]))
+  )
 
   const chapters = vol.chapters.filter((c) => c.type === 'chapter')
   const extras = vol.chapters.filter((c) => c.type === 'extra')
 
   const handleOpen = async (filePath: string): Promise<void> => {
     await api.openFile(filePath)
+  }
+
+  const handleToggleVolFavorite = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleVolumeFavorite(vol.id)
+    if (result !== null) setVolFavorite(result ? 1 : 0)
+  }
+
+  const handleToggleChFavorite = async (e: React.MouseEvent, chId: number): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleChapterFavorite(chId)
+    if (result !== null) setChapterFavorites((prev) => ({ ...prev, [chId]: result ? 1 : 0 }))
   }
 
   return (
@@ -27,6 +58,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
           Volume {vol.number}
         </span>
         <div className="flex items-center gap-3">
+          <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           {vol.file && (
             <span
               role="button"
@@ -69,12 +101,15 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
                   >
                     Chapter {ch.number}
                   </span>
-                  <button
-                    onClick={() => handleOpen(ch.file)}
-                    className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
-                  >
-                    Read
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
+                    <button
+                      onClick={() => handleOpen(ch.file)}
+                      className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                    >
+                      Read
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -96,12 +131,15 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
                   >
                     Extra {ex.number}
                   </span>
-                  <button
-                    onClick={() => handleOpen(ex.file)}
-                    className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
-                  >
-                    Read
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
+                    <button
+                      onClick={() => handleOpen(ex.file)}
+                      className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                    >
+                      Read
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

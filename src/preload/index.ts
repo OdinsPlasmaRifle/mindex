@@ -73,6 +73,7 @@ const api = {
       number: number
       directory: string
       file: string | null
+      favorite: number
       created_at: string
       chapters: Array<{
         id: number
@@ -80,6 +81,7 @@ const api = {
         number: number
         type: 'chapter' | 'extra'
         file: string
+        favorite: number
         created_at: string
       }>
     }>
@@ -93,6 +95,7 @@ const api = {
     number: number
     directory: string
     file: string | null
+    favorite: number
     created_at: string
     chapters: Array<{
       id: number
@@ -100,6 +103,7 @@ const api = {
       number: number
       type: 'chapter' | 'extra'
       file: string
+      favorite: number
       created_at: string
     }>
   } | null> => ipcRenderer.invoke('get-volume', id),
@@ -109,6 +113,12 @@ const api = {
 
   toggleFavorite: (id: number): Promise<boolean | null> =>
     ipcRenderer.invoke('toggle-favorite', id),
+
+  toggleVolumeFavorite: (id: number): Promise<boolean | null> =>
+    ipcRenderer.invoke('toggle-volume-favorite', id),
+
+  toggleChapterFavorite: (id: number): Promise<boolean | null> =>
+    ipcRenderer.invoke('toggle-chapter-favorite', id),
 
   openFile: (filePath: string): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('open-file', filePath),

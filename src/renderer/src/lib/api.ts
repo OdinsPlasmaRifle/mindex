@@ -12,6 +12,8 @@ declare global {
       getVolume(id: number): Promise<VolumeWithChapters | null>
       refreshComic(id: number): Promise<boolean>
       toggleFavorite(id: number): Promise<boolean | null>
+      toggleVolumeFavorite(id: number): Promise<boolean | null>
+      toggleChapterFavorite(id: number): Promise<boolean | null>
       openFile(filePath: string): Promise<{ success?: boolean; error?: string }>
       onHiddenContentToggled(callback: (enabled: boolean) => void): () => void
       getHiddenContentEnabled(): Promise<boolean>

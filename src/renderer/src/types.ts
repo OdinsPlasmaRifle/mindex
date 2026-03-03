@@ -29,6 +29,7 @@ export interface Volume {
   number: number
   directory: string
   file: string | null
+  favorite: number
   created_at: string
 }
 
@@ -38,6 +39,7 @@ export interface Chapter {
   number: number
   type: 'chapter' | 'extra'
   file: string
+  favorite: number
   created_at: string
 }
 

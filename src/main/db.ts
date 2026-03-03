@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -53,6 +53,7 @@ const SCHEMA = `
     number INTEGER NOT NULL,
     directory TEXT NOT NULL,
     file TEXT,
+    favorite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(comic_id, number)
   );
@@ -63,6 +64,7 @@ const SCHEMA = `
     number INTEGER NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
     file TEXT NOT NULL,
+    favorite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(volume_id, number, type)
   );
@@ -108,7 +110,13 @@ function migrateV1toV2(): void {
     }
   }
 
-  db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION)
+  db.prepare('UPDATE schema_version SET version = 2').run()
+}
+
+function migrateV2toV3(): void {
+  db.exec('ALTER TABLE volume ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0')
+  db.exec('ALTER TABLE chapter ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0')
+  db.prepare('UPDATE schema_version SET version = 3').run()
 }
 
 export function initDb(): void {
@@ -130,6 +138,9 @@ export function initDb(): void {
       const migrate = db.transaction(() => {
         if (versionRow.version < 2) {
           migrateV1toV2()
+        }
+        if (versionRow.version < 3) {
+          migrateV2toV3()
         }
       })
       migrate()

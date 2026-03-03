@@ -556,6 +556,28 @@ export function registerIpcHandlers(): void {
     return newValue === 1
   })
 
+  ipcMain.handle('toggle-volume-favorite', (_event, id: number) => {
+    const db = getDb()
+    const volume = db.prepare('SELECT favorite FROM volume WHERE id = ?').get(id) as
+      | { favorite: number }
+      | undefined
+    if (!volume) return null
+    const newValue = volume.favorite ? 0 : 1
+    db.prepare('UPDATE volume SET favorite = ? WHERE id = ?').run(newValue, id)
+    return newValue === 1
+  })
+
+  ipcMain.handle('toggle-chapter-favorite', (_event, id: number) => {
+    const db = getDb()
+    const chapter = db.prepare('SELECT favorite FROM chapter WHERE id = ?').get(id) as
+      | { favorite: number }
+      | undefined
+    if (!chapter) return null
+    const newValue = chapter.favorite ? 0 : 1
+    db.prepare('UPDATE chapter SET favorite = ? WHERE id = ?').run(newValue, id)
+    return newValue === 1
+  })
+
   ipcMain.handle('open-file', async (_event, filePath: string) => {
     const result = await shell.openPath(filePath)
     if (result) {
