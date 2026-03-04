@@ -106,7 +106,7 @@ export default function VolumePage(): React.JSX.Element {
                   key={ch.id}
                   className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--card)]"
                 >
-                  <span className="font-medium">Chapter {ch.number}</span>
+                  <span className="font-medium">Chapter {ch.number}{ch.increment}</span>
                   <div className="flex items-center gap-2">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                     <button

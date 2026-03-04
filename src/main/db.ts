@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -62,11 +62,12 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
     number INTEGER NOT NULL,
+    increment TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
     file TEXT NOT NULL,
     favorite INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(volume_id, number, type)
+    UNIQUE(volume_id, number, increment, type)
   );
 `
 
@@ -119,6 +120,29 @@ function migrateV2toV3(): void {
   db.prepare('UPDATE schema_version SET version = 3').run()
 }
 
+function migrateV3toV4(): void {
+  db.exec(`
+    CREATE TABLE chapter_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
+      number INTEGER NOT NULL,
+      increment TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
+      file TEXT NOT NULL,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(volume_id, number, increment, type)
+    )
+  `)
+  db.exec(`
+    INSERT INTO chapter_new (id, volume_id, number, increment, type, file, favorite, created_at)
+    SELECT id, volume_id, number, '', type, file, favorite, created_at FROM chapter
+  `)
+  db.exec('DROP TABLE chapter')
+  db.exec('ALTER TABLE chapter_new RENAME TO chapter')
+  db.prepare('UPDATE schema_version SET version = 4').run()
+}
+
 export function initDb(): void {
   const dbPath = join(app.getPath('userData'), 'mindex.db')
 
@@ -141,6 +165,9 @@ export function initDb(): void {
         }
         if (versionRow.version < 3) {
           migrateV2toV3()
+        }
+        if (versionRow.version < 4) {
+          migrateV3toV4()
         }
       })
       migrate()

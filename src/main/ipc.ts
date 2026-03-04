@@ -19,12 +19,12 @@ function parseVolumeNumber(name: string): number | null {
   return match ? parseInt(match[1], 10) : null
 }
 
-function parseChapterNumber(name: string): { number: number; type: 'chapter' | 'extra' } | null {
+function parseChapterNumber(name: string): { number: number; increment: string; type: 'chapter' | 'extra' } | null {
   const extraMatch = name.match(/Extra\s*(\d+)/i)
-  if (extraMatch) return { number: parseInt(extraMatch[1], 10), type: 'extra' }
+  if (extraMatch) return { number: parseInt(extraMatch[1], 10), increment: '', type: 'extra' }
 
-  const chMatch = name.match(/Ch\.\s*(\d+)/i)
-  if (chMatch) return { number: parseInt(chMatch[1], 10), type: 'chapter' }
+  const chMatch = name.match(/Ch\.\s*(\d+)([a-z])?/i)
+  if (chMatch) return { number: parseInt(chMatch[1], 10), increment: (chMatch[2] || '').toLowerCase(), type: 'chapter' }
 
   return null
 }
@@ -148,9 +148,10 @@ function scanComicDir(
       const chapterInfo = parseChapterNumber(f.name)
       if (!chapterInfo) continue
 
-      db.prepare('INSERT OR REPLACE INTO chapter (volume_id, number, type, file) VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT OR REPLACE INTO chapter (volume_id, number, increment, type, file) VALUES (?, ?, ?, ?, ?)').run(
         volumeId,
         chapterInfo.number,
+        chapterInfo.increment,
         chapterInfo.type,
         join(relVolDir, f.name)
       )
@@ -499,7 +500,7 @@ export function registerIpcHandlers(): void {
       }
 
       const chapters = db
-        .prepare('SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC')
+        .prepare('SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC, increment ASC')
         .all(vol.id) as Array<Record<string, unknown>>
 
       const resolvedChapters = chapters.map((ch) => {
@@ -531,7 +532,7 @@ export function registerIpcHandlers(): void {
 
     const chapters = db
       .prepare(
-        "SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC"
+        "SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC, increment ASC"
       )
       .all(id) as Array<Record<string, unknown>>
 

@@ -37,6 +37,7 @@ export interface Chapter {
   id: number
   volume_id: number
   number: number
+  increment: string
   type: 'chapter' | 'extra'
   file: string
   favorite: number

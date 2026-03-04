@@ -100,7 +100,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
                     onClick={() => handleOpen(ch.file)}
                     className="text-sm cursor-pointer hover:underline"
                   >
-                    Chapter {ch.number}
+                    Chapter {ch.number}{ch.increment}
                   </span>
                   <div className="flex items-center gap-2">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
