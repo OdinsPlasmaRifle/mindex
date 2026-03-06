@@ -67,7 +67,7 @@ export default function LibraryComicsPage(): React.JSX.Element {
   const handleRandom = async (): Promise<void> => {
     const result = await api.getRandomComic(libraryId)
     if (result) {
-      navigate(`/comic/${result.id}`)
+      navigate(`/comic/${result.id}?from=random&t=${Date.now()}`)
     }
   }
 
@@ -113,7 +113,10 @@ export default function LibraryComicsPage(): React.JSX.Element {
         )}
 
         {library?.description && (
-          <p className="text-sm text-[var(--muted-foreground)] mb-4">{library.description}</p>
+          <p className="text-sm text-[var(--muted-foreground)] mb-3">{library.description}</p>
+        )}
+        {library && (
+          <p className="text-sm text-[var(--muted-foreground)] mb-4">{library.comic_count} comic{library.comic_count !== 1 ? 's' : ''}</p>
         )}
 
         <div className="mb-4">

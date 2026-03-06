@@ -83,6 +83,8 @@ export default function LibrariesPage(): React.JSX.Element {
           </Link>
         </div>
 
+        <p className="text-sm text-[var(--muted-foreground)] mb-4">{libraries.length} {libraries.length === 1 ? 'library' : 'libraries'}</p>
+
         <div className="mb-6">
           <SearchBar value={search} onChange={handleSearch} placeholder="Search by name..." />
         </div>
