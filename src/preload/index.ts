@@ -24,7 +24,9 @@ const api = {
     page: number,
     search: string,
     pageSize?: number,
-    favoritesOnly?: boolean
+    favoritesOnly?: boolean,
+    includedTagIds?: number[],
+    excludedTagIds?: number[]
   ): Promise<{
     comics: Array<{
       id: number
@@ -39,7 +41,17 @@ const api = {
     total: number
     page: number
     pageSize: number
-  }> => ipcRenderer.invoke('get-comics', libraryId, page, search, pageSize, favoritesOnly),
+  }> =>
+    ipcRenderer.invoke(
+      'get-comics',
+      libraryId,
+      page,
+      search,
+      pageSize,
+      favoritesOnly,
+      includedTagIds,
+      excludedTagIds
+    ),
 
   getRandomComic: (libraryId: number): Promise<{ id: number } | null> =>
     ipcRenderer.invoke('get-random-comic', libraryId),
@@ -187,7 +199,50 @@ const api = {
   },
 
   clearAllData: (): Promise<void> =>
-    ipcRenderer.invoke('clear-all-data')
+    ipcRenderer.invoke('clear-all-data'),
+
+  // Tag APIs
+  listTags: (resource: string, search: string, limit?: number): Promise<Array<{ id: number; name: string }>> =>
+    ipcRenderer.invoke('list-tags', resource, search, limit),
+
+  createTag: (name: string, resource: string): Promise<{ id: number; name: string; resource: string }> =>
+    ipcRenderer.invoke('create-tag', name, resource),
+
+  getComicTags: (
+    comicId: number
+  ): Promise<Array<{ id: number; name: string; direct: 0 | 1; count: number }>> =>
+    ipcRenderer.invoke('get-comic-tags', comicId),
+
+  getVolumeTags: (
+    volumeId: number
+  ): Promise<Array<{ id: number; name: string; direct: 0 | 1; count: number }>> =>
+    ipcRenderer.invoke('get-volume-tags', volumeId),
+
+  getChapterTags: (
+    chapterId: number
+  ): Promise<Array<{ id: number; name: string; direct: 1; count: number }>> =>
+    ipcRenderer.invoke('get-chapter-tags', chapterId),
+
+  attachTag: (
+    level: 'comic' | 'volume' | 'chapter',
+    entityId: number,
+    tagId: number
+  ): Promise<void> => ipcRenderer.invoke('attach-tag', level, entityId, tagId),
+
+  detachTag: (
+    level: 'comic' | 'volume' | 'chapter',
+    entityId: number,
+    tagId: number
+  ): Promise<void> => ipcRenderer.invoke('detach-tag', level, entityId, tagId),
+
+  getLibraryTags: (libraryId: number): Promise<Array<{ id: number; name: string }>> =>
+    ipcRenderer.invoke('get-library-tags', libraryId),
+
+  onTagsUpdated: (callback: () => void): (() => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('tags-updated', handler)
+    return () => ipcRenderer.removeListener('tags-updated', handler)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

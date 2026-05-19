@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { api, localFileUrl } from '../lib/api'
 import { showStatus } from '../components/StatusToast'
 import ImageLightbox from '../components/ImageLightbox'
+import TagPool from '../components/TagPool'
 import type { ComicWithVolumes, VolumeWithChapters } from '../types'
 
 function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }): React.JSX.Element {
@@ -48,17 +49,30 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] overflow-hidden">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-4 text-left hover:bg-[var(--secondary)] transition-colors cursor-pointer"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen(!open)
+          }
+        }}
+        className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--secondary)] transition-colors cursor-pointer"
       >
-        <span
-          className={`font-medium ${vol.file ? 'hover:underline' : ''}`}
-          onClick={vol.file ? (e) => { e.stopPropagation(); handleOpen(vol.file!) } : undefined}
-        >
-          Volume {vol.number}
-        </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-wrap">
+          <span
+            className={`font-medium ${vol.file ? 'hover:underline' : ''}`}
+            onClick={vol.file ? (e) => { e.stopPropagation(); handleOpen(vol.file!) } : undefined}
+          >
+            Volume {vol.number}
+          </span>
+          <div onClick={(e) => e.stopPropagation()}>
+            <TagPool level="volume" entityId={vol.id} resource="comics" size="compact" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
           <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           {vol.file && (
             <span
@@ -85,7 +99,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-[var(--border)]">
@@ -94,15 +108,18 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
               {chapters.map((ch) => (
                 <div
                   key={ch.id}
-                  className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
                 >
-                  <span
-                    onClick={() => handleOpen(ch.file)}
-                    className="text-sm cursor-pointer hover:underline"
-                  >
-                    Chapter {ch.number}{ch.increment}
-                  </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                    <span
+                      onClick={() => handleOpen(ch.file)}
+                      className="text-sm cursor-pointer hover:underline"
+                    >
+                      Chapter {ch.number}{ch.increment}
+                    </span>
+                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                     <button
                       onClick={() => handleOpen(ch.file)}
@@ -124,15 +141,18 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
               {extras.map((ex) => (
                 <div
                   key={ex.id}
-                  className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
                 >
-                  <span
-                    onClick={() => handleOpen(ex.file)}
-                    className="text-sm cursor-pointer hover:underline"
-                  >
-                    Extra {ex.number}
-                  </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                    <span
+                      onClick={() => handleOpen(ex.file)}
+                      className="text-sm cursor-pointer hover:underline"
+                    >
+                      Extra {ex.number}
+                    </span>
+                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                     <button
                       onClick={() => handleOpen(ex.file)}
@@ -306,6 +326,9 @@ export default function ComicDetailPage(): React.JSX.Element {
               >
                 {refreshing ? 'Refreshing...' : 'Refresh'}
               </button>
+            </div>
+            <div className="mt-3">
+              <TagPool level="comic" entityId={comic.id} resource="comics" />
             </div>
           </div>
         </div>

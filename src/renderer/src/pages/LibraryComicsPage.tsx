@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { Comic, LibraryWithCount } from '../types'
+import type { Comic, LibraryWithCount, TagFilterState } from '../types'
 import ComicCard from '../components/ComicCard'
 import SearchBar from '../components/SearchBar'
 import Pagination from '../components/Pagination'
+import TagFilterPool from '../components/TagFilterPool'
 
 const PAGE_SIZE = 20
 
 const savedPages: Record<number, number> = {}
 const savedSearch: Record<number, string> = {}
 const savedFavoritesOnly: Record<number, boolean> = {}
+const savedTagFilters: Record<number, Record<number, TagFilterState>> = {}
+const savedTagsPanelOpen: Record<number, boolean> = {}
 
 export default function LibraryComicsPage(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -23,6 +26,12 @@ export default function LibraryComicsPage(): React.JSX.Element {
   const [page, setPage] = useState(savedPages[libraryId] ?? 1)
   const [search, setSearch] = useState(savedSearch[libraryId] ?? '')
   const [favoritesOnly, setFavoritesOnly] = useState(savedFavoritesOnly[libraryId] ?? false)
+  const [tagFilters, setTagFilters] = useState<Record<number, TagFilterState>>(
+    savedTagFilters[libraryId] ?? {}
+  )
+  const [tagsPanelOpen, setTagsPanelOpen] = useState<boolean>(
+    savedTagsPanelOpen[libraryId] ?? false
+  )
   const [missingSourcePaths, setMissingSourcePaths] = useState<string[]>([])
 
   useEffect(() => {
@@ -42,11 +51,33 @@ export default function LibraryComicsPage(): React.JSX.Element {
     savedFavoritesOnly[libraryId] = favoritesOnly
   }, [libraryId, favoritesOnly])
 
+  useEffect(() => {
+    savedTagFilters[libraryId] = tagFilters
+  }, [libraryId, tagFilters])
+
+  useEffect(() => {
+    savedTagsPanelOpen[libraryId] = tagsPanelOpen
+  }, [libraryId, tagsPanelOpen])
+
   const loadComics = useCallback(async () => {
-    const result = await api.getComics(libraryId, page, search, PAGE_SIZE, favoritesOnly)
+    const included = Object.entries(tagFilters)
+      .filter(([, s]) => s === 'included')
+      .map(([id]) => Number(id))
+    const excluded = Object.entries(tagFilters)
+      .filter(([, s]) => s === 'excluded')
+      .map(([id]) => Number(id))
+    const result = await api.getComics(
+      libraryId,
+      page,
+      search,
+      PAGE_SIZE,
+      favoritesOnly,
+      included,
+      excluded
+    )
     setComics(result.comics)
     setTotal(result.total)
-  }, [libraryId, page, search, favoritesOnly])
+  }, [libraryId, page, search, favoritesOnly, tagFilters])
 
   useEffect(() => {
     loadComics()
@@ -54,6 +85,12 @@ export default function LibraryComicsPage(): React.JSX.Element {
 
   useEffect(() => {
     return api.onComicsUpdated(() => {
+      loadComics()
+    })
+  }, [loadComics])
+
+  useEffect(() => {
+    return api.onTagsUpdated(() => {
       loadComics()
     })
   }, [loadComics])
@@ -156,7 +193,34 @@ export default function LibraryComicsPage(): React.JSX.Element {
             </svg>
             Random
           </button>
+          <button
+            onClick={() => setTagsPanelOpen((o) => !o)}
+            className={`flex items-center gap-1.5 px-3 py-1 text-sm rounded border transition-colors ${
+              Object.keys(tagFilters).length > 0
+                ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]'
+                : 'border-[var(--border)] hover:bg-[var(--secondary)]'
+            }`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+            </svg>
+            Tags{Object.keys(tagFilters).length > 0 ? ` (${Object.keys(tagFilters).length})` : ''}
+          </button>
         </div>
+
+        {tagsPanelOpen && (
+          <div className="mb-6 p-3 rounded border border-[var(--border)] bg-[var(--card)]">
+            <TagFilterPool
+              libraryId={libraryId}
+              value={tagFilters}
+              onChange={(next) => {
+                setTagFilters(next)
+                setPage(1)
+              }}
+            />
+          </div>
+        )}
 
         {comics.length === 0 ? (
           <div className="text-center py-20 text-[var(--muted-foreground)]">

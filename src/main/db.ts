@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -69,6 +69,40 @@ const SCHEMA = `
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(volume_id, number, increment, type)
   );
+
+  CREATE TABLE tag (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    resource TEXT NOT NULL CHECK(resource IN ('comics')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(name, resource)
+  );
+
+  CREATE TABLE comic_tag (
+    comic_id INTEGER NOT NULL REFERENCES comic(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (comic_id, tag_id)
+  );
+
+  CREATE TABLE volume_tag (
+    volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (volume_id, tag_id)
+  );
+
+  CREATE TABLE chapter_tag (
+    chapter_id INTEGER NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (chapter_id, tag_id)
+  );
+
+  CREATE INDEX idx_comic_tag_tag ON comic_tag(tag_id, comic_id);
+  CREATE INDEX idx_volume_tag_tag ON volume_tag(tag_id, volume_id);
+  CREATE INDEX idx_chapter_tag_tag ON chapter_tag(tag_id, chapter_id);
+  CREATE INDEX idx_tag_resource_name ON tag(resource, name);
 `
 
 function migrateV1toV2(): void {
@@ -120,6 +154,45 @@ function migrateV2toV3(): void {
   db.prepare('UPDATE schema_version SET version = 3').run()
 }
 
+function migrateV4toV5(): void {
+  db.exec(`
+    CREATE TABLE tag (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      resource TEXT NOT NULL CHECK(resource IN ('comics')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(name, resource)
+    );
+
+    CREATE TABLE comic_tag (
+      comic_id INTEGER NOT NULL REFERENCES comic(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (comic_id, tag_id)
+    );
+
+    CREATE TABLE volume_tag (
+      volume_id INTEGER NOT NULL REFERENCES volume(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (volume_id, tag_id)
+    );
+
+    CREATE TABLE chapter_tag (
+      chapter_id INTEGER NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chapter_id, tag_id)
+    );
+
+    CREATE INDEX idx_comic_tag_tag ON comic_tag(tag_id, comic_id);
+    CREATE INDEX idx_volume_tag_tag ON volume_tag(tag_id, volume_id);
+    CREATE INDEX idx_chapter_tag_tag ON chapter_tag(tag_id, chapter_id);
+    CREATE INDEX idx_tag_resource_name ON tag(resource, name);
+  `)
+  db.prepare('UPDATE schema_version SET version = 5').run()
+}
+
 function migrateV3toV4(): void {
   db.exec(`
     CREATE TABLE chapter_new (
@@ -168,6 +241,9 @@ export function initDb(): void {
         }
         if (versionRow.version < 4) {
           migrateV3toV4()
+        }
+        if (versionRow.version < 5) {
+          migrateV4toV5()
         }
       })
       migrate()

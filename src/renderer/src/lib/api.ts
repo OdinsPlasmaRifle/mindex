@@ -1,4 +1,15 @@
-import type { ComicsPage, ComicWithVolumes, VolumeWithChapters, LibraryWithCount, Source, SourceWithStatus } from '../types'
+import type {
+  ComicsPage,
+  ComicWithVolumes,
+  VolumeWithChapters,
+  LibraryWithCount,
+  Source,
+  SourceWithStatus,
+  Tag,
+  TagWithSource,
+  TagLevel,
+  TagResource
+} from '../types'
 
 declare global {
   interface Window {
@@ -6,7 +17,7 @@ declare global {
       onComicsUpdated(callback: () => void): () => void
       onImportStarted(callback: () => void): () => void
       onImportFinished(callback: () => void): () => void
-      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean): Promise<ComicsPage>
+      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean, includedTagIds?: number[], excludedTagIds?: number[]): Promise<ComicsPage>
       getRandomComic(libraryId: number): Promise<{ id: number } | null>
       getComic(id: number): Promise<ComicWithVolumes | null>
       getVolume(id: number): Promise<VolumeWithChapters | null>
@@ -36,6 +47,15 @@ declare global {
       deleteLibrary(id: number): Promise<boolean>
       onNavigateAddLibrary(callback: () => void): () => void
       clearAllData(): Promise<void>
+      listTags(resource: TagResource, search: string, limit?: number): Promise<Array<{ id: number; name: string }>>
+      createTag(name: string, resource: TagResource): Promise<Tag>
+      getComicTags(comicId: number): Promise<TagWithSource[]>
+      getVolumeTags(volumeId: number): Promise<TagWithSource[]>
+      getChapterTags(chapterId: number): Promise<TagWithSource[]>
+      attachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
+      detachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
+      getLibraryTags(libraryId: number): Promise<Array<{ id: number; name: string }>>
+      onTagsUpdated(callback: () => void): () => void
     }
   }
 }

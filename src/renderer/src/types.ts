@@ -69,3 +69,21 @@ export interface Source {
 export interface SourceWithStatus extends Source {
   exists: boolean
 }
+
+export type TagResource = 'comics'
+export type TagLevel = 'comic' | 'volume' | 'chapter'
+
+export interface Tag {
+  id: number
+  name: string
+  resource: TagResource
+}
+
+export interface TagWithSource {
+  id: number
+  name: string
+  direct: 0 | 1
+  count: number
+}
+
+export type TagFilterState = 'included' | 'excluded'

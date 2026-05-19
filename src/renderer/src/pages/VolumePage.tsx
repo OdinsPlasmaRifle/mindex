@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import TagPool from '../components/TagPool'
 import type { VolumeWithChapters } from '../types'
 
 function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }): React.JSX.Element {
@@ -95,6 +96,9 @@ export default function VolumePage(): React.JSX.Element {
             )}
             <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           </div>
+          <div className="mt-3">
+            <TagPool level="volume" entityId={volume.id} resource="comics" />
+          </div>
         </div>
 
         {chapters.length > 0 && (
@@ -104,10 +108,13 @@ export default function VolumePage(): React.JSX.Element {
               {chapters.map((ch) => (
                 <div
                   key={ch.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--card)]"
+                  className="flex items-center justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--card)]"
                 >
-                  <span className="font-medium">Chapter {ch.number}{ch.increment}</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                    <span className="font-medium">Chapter {ch.number}{ch.increment}</span>
+                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                     <button
                       onClick={() => handleOpen(ch.file)}
@@ -129,10 +136,13 @@ export default function VolumePage(): React.JSX.Element {
               {extras.map((ex) => (
                 <div
                   key={ex.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--card)]"
+                  className="flex items-center justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--card)]"
                 >
-                  <span className="font-medium">Extra {ex.number}</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                    <span className="font-medium">Extra {ex.number}</span>
+                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                     <button
                       onClick={() => handleOpen(ex.file)}

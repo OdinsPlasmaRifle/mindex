@@ -8,6 +8,12 @@ export function setMenuRebuildCallback(cb: () => void): void {
   onMenuRebuild = cb
 }
 
+const TAG_VISIBLE_SQL = `(
+  EXISTS (SELECT 1 FROM comic_tag ct WHERE ct.comic_id = c.id AND ct.tag_id = ?)
+  OR EXISTS (SELECT 1 FROM volume v JOIN volume_tag vt ON vt.volume_id = v.id WHERE v.comic_id = c.id AND vt.tag_id = ?)
+  OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id JOIN chapter_tag cht ON cht.chapter_id = ch.id WHERE v.comic_id = c.id AND cht.tag_id = ?)
+)`
+
 function parseComicFolder(name: string): { name: string; author: string } | null {
   const match = name.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
   if (!match) return null
@@ -425,7 +431,16 @@ export function getMissingSourcePaths(libraryId: number): string[] {
 export function registerIpcHandlers(): void {
   ipcMain.handle(
     'get-comics',
-    (_event, libraryId: number, page: number, search: string, pageSize: number = 20, favoritesOnly: boolean = false) => {
+    (
+      _event,
+      libraryId: number,
+      page: number,
+      search: string,
+      pageSize: number = 20,
+      favoritesOnly: boolean = false,
+      includedTagIds: number[] = [],
+      excludedTagIds: number[] = []
+    ) => {
       const db = getDb()
       const offset = (page - 1) * pageSize
 
@@ -440,6 +455,16 @@ export function registerIpcHandlers(): void {
 
       if (favoritesOnly) {
         conditions.push('c.favorite = 1')
+      }
+
+      for (const tagId of includedTagIds) {
+        conditions.push(TAG_VISIBLE_SQL)
+        params.push(tagId, tagId, tagId)
+      }
+
+      for (const tagId of excludedTagIds) {
+        conditions.push(`NOT ${TAG_VISIBLE_SQL}`)
+        params.push(tagId, tagId, tagId)
       }
 
       const whereClause = 'WHERE ' + conditions.join(' AND ')
@@ -699,5 +724,126 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('clear-all-data', (event) => {
     clearAllData()
     event.sender.send('comics-updated')
+  })
+
+  // Tag handlers
+  ipcMain.handle('list-tags', (_event, resource: string, search: string, limit: number = 20) => {
+    const db = getDb()
+    return db
+      .prepare(
+        'SELECT id, name FROM tag WHERE resource = ? AND name LIKE ? ORDER BY name COLLATE NOCASE ASC LIMIT ?'
+      )
+      .all(resource, `%${search}%`, limit) as Array<{ id: number; name: string }>
+  })
+
+  ipcMain.handle('create-tag', (event, name: string, resource: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('Tag name cannot be empty')
+    const db = getDb()
+    const row = db
+      .prepare(
+        'INSERT INTO tag (name, resource) VALUES (?, ?) ON CONFLICT(name, resource) DO UPDATE SET name = excluded.name RETURNING id, name, resource'
+      )
+      .get(trimmed, resource) as { id: number; name: string; resource: string }
+    event.sender.send('tags-updated')
+    return row
+  })
+
+  ipcMain.handle('get-comic-tags', (_event, comicId: number) => {
+    const db = getDb()
+    return db
+      .prepare(
+        `WITH attachments AS (
+          SELECT tag_id, 'comic' AS lvl FROM comic_tag WHERE comic_id = ?
+          UNION ALL
+          SELECT tag_id, 'volume' AS lvl FROM volume_tag WHERE volume_id IN (SELECT id FROM volume WHERE comic_id = ?)
+          UNION ALL
+          SELECT tag_id, 'chapter' AS lvl FROM chapter_tag WHERE chapter_id IN (
+            SELECT ch.id FROM chapter ch JOIN volume v ON v.id = ch.volume_id WHERE v.comic_id = ?
+          )
+        )
+        SELECT t.id, t.name,
+          MAX(CASE WHEN a.lvl = 'comic' THEN 1 ELSE 0 END) AS direct,
+          COUNT(*) AS count
+        FROM tag t JOIN attachments a ON a.tag_id = t.id
+        GROUP BY t.id, t.name
+        ORDER BY t.name COLLATE NOCASE ASC`
+      )
+      .all(comicId, comicId, comicId) as Array<{ id: number; name: string; direct: 0 | 1; count: number }>
+  })
+
+  ipcMain.handle('get-volume-tags', (_event, volumeId: number) => {
+    const db = getDb()
+    return db
+      .prepare(
+        `WITH attachments AS (
+          SELECT tag_id, 'volume' AS lvl FROM volume_tag WHERE volume_id = ?
+          UNION ALL
+          SELECT tag_id, 'chapter' AS lvl FROM chapter_tag WHERE chapter_id IN (SELECT id FROM chapter WHERE volume_id = ?)
+        )
+        SELECT t.id, t.name,
+          MAX(CASE WHEN a.lvl = 'volume' THEN 1 ELSE 0 END) AS direct,
+          COUNT(*) AS count
+        FROM tag t JOIN attachments a ON a.tag_id = t.id
+        GROUP BY t.id, t.name
+        ORDER BY t.name COLLATE NOCASE ASC`
+      )
+      .all(volumeId, volumeId) as Array<{ id: number; name: string; direct: 0 | 1; count: number }>
+  })
+
+  ipcMain.handle('get-chapter-tags', (_event, chapterId: number) => {
+    const db = getDb()
+    return db
+      .prepare(
+        'SELECT t.id, t.name, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ? ORDER BY t.name COLLATE NOCASE ASC'
+      )
+      .all(chapterId) as Array<{ id: number; name: string; direct: 1; count: number }>
+  })
+
+  ipcMain.handle(
+    'attach-tag',
+    (event, level: 'comic' | 'volume' | 'chapter', entityId: number, tagId: number) => {
+      const db = getDb()
+      if (level === 'comic') {
+        db.prepare('INSERT OR IGNORE INTO comic_tag (comic_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
+      } else if (level === 'volume') {
+        db.prepare('INSERT OR IGNORE INTO volume_tag (volume_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
+      } else {
+        db.prepare('INSERT OR IGNORE INTO chapter_tag (chapter_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
+      }
+      event.sender.send('tags-updated')
+    }
+  )
+
+  ipcMain.handle(
+    'detach-tag',
+    (event, level: 'comic' | 'volume' | 'chapter', entityId: number, tagId: number) => {
+      const db = getDb()
+      if (level === 'comic') {
+        db.prepare('DELETE FROM comic_tag WHERE comic_id = ? AND tag_id = ?').run(entityId, tagId)
+      } else if (level === 'volume') {
+        db.prepare('DELETE FROM volume_tag WHERE volume_id = ? AND tag_id = ?').run(entityId, tagId)
+      } else {
+        db.prepare('DELETE FROM chapter_tag WHERE chapter_id = ? AND tag_id = ?').run(entityId, tagId)
+      }
+      event.sender.send('tags-updated')
+    }
+  )
+
+  ipcMain.handle('get-library-tags', (_event, libraryId: number) => {
+    const db = getDb()
+    return db
+      .prepare(
+        `SELECT DISTINCT t.id, t.name FROM tag t
+        WHERE t.id IN (
+          SELECT ct.tag_id FROM comic_tag ct JOIN comic c ON c.id = ct.comic_id WHERE c.library_id = ?
+          UNION
+          SELECT vt.tag_id FROM volume_tag vt JOIN volume v ON v.id = vt.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
+          UNION
+          SELECT cht.tag_id FROM chapter_tag cht JOIN chapter ch ON ch.id = cht.chapter_id JOIN volume v ON v.id = ch.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
+        )
+        ORDER BY t.name COLLATE NOCASE ASC`
+      )
+      .all(libraryId, libraryId, libraryId) as Array<{ id: number; name: string }>
   })
 }
