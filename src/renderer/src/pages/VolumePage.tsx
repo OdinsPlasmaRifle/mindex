@@ -97,7 +97,7 @@ export default function VolumePage(): React.JSX.Element {
             <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           </div>
           <div className="mt-3">
-            <TagPool level="volume" entityId={volume.id} resource="comics" />
+            <TagPool level="volume" entityId={volume.id} resource="comics" libraryIsHidden={volume.library_is_hidden === 1} />
           </div>
         </div>
 
@@ -112,7 +112,7 @@ export default function VolumePage(): React.JSX.Element {
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-wrap">
                     <span className="font-medium">Chapter {ch.number}{ch.increment}</span>
-                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" />
+                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
@@ -140,7 +140,7 @@ export default function VolumePage(): React.JSX.Element {
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-wrap">
                     <span className="font-medium">Extra {ex.number}</span>
-                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" />
+                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />

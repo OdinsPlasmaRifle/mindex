@@ -503,7 +503,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-comic', (_event, id: number) => {
     const db = getDb()
     const comic = db.prepare(
-      'SELECT c.*, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id WHERE c.id = ?'
+      'SELECT c.*, s.path as source_path, l.is_hidden as library_is_hidden FROM comic c LEFT JOIN source s ON s.id = c.source_id LEFT JOIN library l ON l.id = c.library_id WHERE c.id = ?'
     ).get(id) as Record<string, unknown> | undefined
     if (!comic) return null
 
@@ -544,7 +544,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-volume', (_event, id: number) => {
     const db = getDb()
     const volume = db.prepare(
-      'SELECT v.*, s.path as source_path FROM volume v JOIN comic c ON c.id = v.comic_id LEFT JOIN source s ON s.id = c.source_id WHERE v.id = ?'
+      'SELECT v.*, s.path as source_path, l.is_hidden as library_is_hidden FROM volume v JOIN comic c ON c.id = v.comic_id LEFT JOIN source s ON s.id = c.source_id LEFT JOIN library l ON l.id = c.library_id WHERE v.id = ?'
     ).get(id) as Record<string, unknown> | undefined
     if (!volume) return null
 
@@ -727,27 +727,45 @@ export function registerIpcHandlers(): void {
   })
 
   // Tag handlers
-  ipcMain.handle('list-tags', (_event, resource: string, search: string, limit: number = 20) => {
-    const db = getDb()
-    return db
-      .prepare(
-        'SELECT id, name FROM tag WHERE resource = ? AND name LIKE ? ORDER BY name COLLATE NOCASE ASC LIMIT ?'
-      )
-      .all(resource, `%${search}%`, limit) as Array<{ id: number; name: string }>
-  })
+  ipcMain.handle(
+    'list-tags',
+    (
+      _event,
+      resource: string,
+      search: string,
+      limit: number = 20,
+      includeHidden: boolean = false
+    ) => {
+      const db = getDb()
+      const hiddenClause = includeHidden ? '' : ' AND is_hidden = 0'
+      return db
+        .prepare(
+          `SELECT id, name, is_hidden FROM tag WHERE resource = ? AND name LIKE ?${hiddenClause} ORDER BY name COLLATE NOCASE ASC LIMIT ?`
+        )
+        .all(resource, `%${search}%`, limit) as Array<{ id: number; name: string; is_hidden: number }>
+    }
+  )
 
-  ipcMain.handle('create-tag', (event, name: string, resource: string) => {
-    const trimmed = name.trim()
-    if (!trimmed) throw new Error('Tag name cannot be empty')
-    const db = getDb()
-    const row = db
-      .prepare(
-        'INSERT INTO tag (name, resource) VALUES (?, ?) ON CONFLICT(name, resource) DO UPDATE SET name = excluded.name RETURNING id, name, resource'
-      )
-      .get(trimmed, resource) as { id: number; name: string; resource: string }
-    event.sender.send('tags-updated')
-    return row
-  })
+  ipcMain.handle(
+    'create-tag',
+    (event, name: string, resource: string, isHidden: boolean = false) => {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('Tag name cannot be empty')
+      const db = getDb()
+      const row = db
+        .prepare(
+          'INSERT INTO tag (name, resource, is_hidden) VALUES (?, ?, ?) ON CONFLICT(name, resource) DO UPDATE SET name = excluded.name RETURNING id, name, resource, is_hidden'
+        )
+        .get(trimmed, resource, isHidden ? 1 : 0) as {
+        id: number
+        name: string
+        resource: string
+        is_hidden: number
+      }
+      event.sender.send('tags-updated')
+      return row
+    }
+  )
 
   ipcMain.handle('get-comic-tags', (_event, comicId: number) => {
     const db = getDb()
@@ -762,14 +780,14 @@ export function registerIpcHandlers(): void {
             SELECT ch.id FROM chapter ch JOIN volume v ON v.id = ch.volume_id WHERE v.comic_id = ?
           )
         )
-        SELECT t.id, t.name,
+        SELECT t.id, t.name, t.is_hidden,
           MAX(CASE WHEN a.lvl = 'comic' THEN 1 ELSE 0 END) AS direct,
           COUNT(*) AS count
         FROM tag t JOIN attachments a ON a.tag_id = t.id
-        GROUP BY t.id, t.name
+        GROUP BY t.id, t.name, t.is_hidden
         ORDER BY t.name COLLATE NOCASE ASC`
       )
-      .all(comicId, comicId, comicId) as Array<{ id: number; name: string; direct: 0 | 1; count: number }>
+      .all(comicId, comicId, comicId) as Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>
   })
 
   ipcMain.handle('get-volume-tags', (_event, volumeId: number) => {
@@ -781,23 +799,23 @@ export function registerIpcHandlers(): void {
           UNION ALL
           SELECT tag_id, 'chapter' AS lvl FROM chapter_tag WHERE chapter_id IN (SELECT id FROM chapter WHERE volume_id = ?)
         )
-        SELECT t.id, t.name,
+        SELECT t.id, t.name, t.is_hidden,
           MAX(CASE WHEN a.lvl = 'volume' THEN 1 ELSE 0 END) AS direct,
           COUNT(*) AS count
         FROM tag t JOIN attachments a ON a.tag_id = t.id
-        GROUP BY t.id, t.name
+        GROUP BY t.id, t.name, t.is_hidden
         ORDER BY t.name COLLATE NOCASE ASC`
       )
-      .all(volumeId, volumeId) as Array<{ id: number; name: string; direct: 0 | 1; count: number }>
+      .all(volumeId, volumeId) as Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>
   })
 
   ipcMain.handle('get-chapter-tags', (_event, chapterId: number) => {
     const db = getDb()
     return db
       .prepare(
-        'SELECT t.id, t.name, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ? ORDER BY t.name COLLATE NOCASE ASC'
+        'SELECT t.id, t.name, t.is_hidden, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ? ORDER BY t.name COLLATE NOCASE ASC'
       )
-      .all(chapterId) as Array<{ id: number; name: string; direct: 1; count: number }>
+      .all(chapterId) as Array<{ id: number; name: string; is_hidden: number; direct: 1; count: number }>
   })
 
   ipcMain.handle(
@@ -830,20 +848,68 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle(
+    'get-all-tags',
+    (_event, search: string = '', includeHidden: boolean = false) => {
+      const db = getDb()
+      const hiddenClause = includeHidden ? '' : ' AND is_hidden = 0'
+      return db
+        .prepare(
+          `SELECT id, name, resource, is_hidden FROM tag WHERE name LIKE ?${hiddenClause} ORDER BY resource ASC, name COLLATE NOCASE ASC`
+        )
+        .all(`%${search}%`) as Array<{ id: number; name: string; resource: string; is_hidden: number }>
+    }
+  )
+
+  ipcMain.handle(
+    'update-tag',
+    (event, id: number, opts: { name?: string; isHidden?: boolean }) => {
+      const db = getDb()
+      const sets: string[] = []
+      const params: unknown[] = []
+      if (opts.name !== undefined) {
+        const trimmed = opts.name.trim()
+        if (!trimmed) throw new Error('Tag name cannot be empty')
+        sets.push('name = ?')
+        params.push(trimmed)
+      }
+      if (opts.isHidden !== undefined) {
+        sets.push('is_hidden = ?')
+        params.push(opts.isHidden ? 1 : 0)
+      }
+      if (sets.length === 0) return false
+      params.push(id)
+      const result = db.prepare(`UPDATE tag SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+      if (result.changes > 0) event.sender.send('tags-updated')
+      return result.changes > 0
+    }
+  )
+
+  ipcMain.handle('delete-tag', (event, id: number) => {
+    const db = getDb()
+    const result = db.prepare('DELETE FROM tag WHERE id = ?').run(id)
+    if (result.changes > 0) event.sender.send('tags-updated')
+    return result.changes > 0
+  })
+
   ipcMain.handle('get-library-tags', (_event, libraryId: number) => {
     const db = getDb()
+    const library = db.prepare('SELECT is_hidden FROM library WHERE id = ?').get(libraryId) as
+      | { is_hidden: number }
+      | undefined
+    const hiddenClause = library?.is_hidden ? '' : ' AND t.is_hidden = 0'
     return db
       .prepare(
-        `SELECT DISTINCT t.id, t.name FROM tag t
+        `SELECT DISTINCT t.id, t.name, t.is_hidden FROM tag t
         WHERE t.id IN (
           SELECT ct.tag_id FROM comic_tag ct JOIN comic c ON c.id = ct.comic_id WHERE c.library_id = ?
           UNION
           SELECT vt.tag_id FROM volume_tag vt JOIN volume v ON v.id = vt.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
           UNION
           SELECT cht.tag_id FROM chapter_tag cht JOIN chapter ch ON ch.id = cht.chapter_id JOIN volume v ON v.id = ch.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
-        )
+        )${hiddenClause}
         ORDER BY t.name COLLATE NOCASE ASC`
       )
-      .all(libraryId, libraryId, libraryId) as Array<{ id: number; name: string }>
+      .all(libraryId, libraryId, libraryId) as Array<{ id: number; name: string; is_hidden: number }>
   })
 }

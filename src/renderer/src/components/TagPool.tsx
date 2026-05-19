@@ -8,6 +8,7 @@ interface TagPoolProps {
   resource: TagResource
   size?: 'normal' | 'compact'
   className?: string
+  libraryIsHidden?: boolean
 }
 
 async function fetchTags(level: TagLevel, entityId: number): Promise<TagWithSource[]> {
@@ -16,18 +17,28 @@ async function fetchTags(level: TagLevel, entityId: number): Promise<TagWithSour
   return api.getChapterTags(entityId)
 }
 
+function HiddenIcon({ className = 'w-3 h-3' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+    </svg>
+  )
+}
+
 export default function TagPool({
   level,
   entityId,
   resource,
   size = 'normal',
-  className = ''
+  className = '',
+  libraryIsHidden = false
 }: TagPoolProps): React.JSX.Element {
   const [tags, setTags] = useState<TagWithSource[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [results, setResults] = useState<Array<{ id: number; name: string }>>([])
+  const [results, setResults] = useState<Array<{ id: number; name: string; is_hidden: number }>>([])
+  const [createHidden, setCreateHidden] = useState(libraryIsHidden)
   const pickerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -50,13 +61,13 @@ export default function TagPool({
   useEffect(() => {
     if (!pickerOpen) return
     let cancelled = false
-    api.listTags(resource, debouncedQuery, 20).then((r) => {
+    api.listTags(resource, debouncedQuery, 20, libraryIsHidden).then((r) => {
       if (!cancelled) setResults(r)
     })
     return () => {
       cancelled = true
     }
-  }, [pickerOpen, debouncedQuery, resource])
+  }, [pickerOpen, debouncedQuery, resource, libraryIsHidden])
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -80,9 +91,10 @@ export default function TagPool({
     if (pickerOpen) {
       setQuery('')
       setDebouncedQuery('')
+      setCreateHidden(libraryIsHidden)
       setTimeout(() => inputRef.current?.focus(), 0)
     }
-  }, [pickerOpen])
+  }, [pickerOpen, libraryIsHidden])
 
   const directIds = new Set(tags.filter((t) => t.direct === 1).map((t) => t.id))
   const trimmed = query.trim()
@@ -106,7 +118,7 @@ export default function TagPool({
 
   const handleCreate = async (): Promise<void> => {
     if (!trimmed) return
-    const created = await api.createTag(trimmed, resource)
+    const created = await api.createTag(trimmed, resource, createHidden)
     await api.attachTag(level, entityId, created.id)
     setPickerOpen(false)
   }
@@ -127,19 +139,19 @@ export default function TagPool({
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
       {tags.map((tag) => {
-        const label =
-          tag.count > 1 ? (
-            <>
-              <span>{tag.name}</span>
-              <span className="text-[var(--muted-foreground)]">({tag.count})</span>
-            </>
-          ) : (
+        const isHidden = tag.is_hidden === 1
+        const label = (
+          <>
+            {isHidden && <HiddenIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />}
             <span>{tag.name}</span>
-          )
+            {tag.count > 1 && <span className="text-[var(--muted-foreground)]">({tag.count})</span>}
+          </>
+        )
         return tag.direct === 1 ? (
           <span
             key={tag.id}
             className={`${chipBase} border-[var(--border)] bg-[var(--secondary)] text-[var(--secondary-foreground)]`}
+            title={isHidden ? 'Hidden tag' : undefined}
           >
             {label}
             <button
@@ -157,7 +169,7 @@ export default function TagPool({
           <span
             key={tag.id}
             className={`${chipBase} border-[var(--border)] text-[var(--foreground)]`}
-            title="Inherited from a lower level"
+            title={isHidden ? 'Hidden tag · inherited from a lower level' : 'Inherited from a lower level'}
           >
             {label}
           </span>
@@ -189,6 +201,18 @@ export default function TagPool({
                 placeholder="Search or create..."
                 className="w-full text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
               />
+              {showCreate && (
+                <label className="mt-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createHidden}
+                    onChange={(e) => setCreateHidden(e.target.checked)}
+                    className="cursor-pointer"
+                  />
+                  <HiddenIcon className="w-3 h-3" />
+                  <span>Hidden tag</span>
+                </label>
+              )}
             </div>
             <div className="max-h-48 overflow-y-auto">
               {filteredResults.map((r) => (
@@ -196,9 +220,10 @@ export default function TagPool({
                   key={r.id}
                   type="button"
                   onClick={() => handleAttach(r.id)}
-                  className="w-full text-left text-sm px-3 py-1.5 hover:bg-[var(--secondary)] transition-colors"
+                  className="w-full text-left text-sm px-3 py-1.5 hover:bg-[var(--secondary)] transition-colors flex items-center gap-1.5"
                 >
-                  {r.name}
+                  {r.is_hidden === 1 && <HiddenIcon className="w-3 h-3 text-[var(--muted-foreground)]" />}
+                  <span>{r.name}</span>
                 </button>
               ))}
               {filteredResults.length === 0 && !showCreate && (
@@ -213,6 +238,7 @@ export default function TagPool({
                   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                   </svg>
+                  {createHidden && <HiddenIcon className="w-3 h-3" />}
                   Create &ldquo;{trimmed}&rdquo;
                 </button>
               )}

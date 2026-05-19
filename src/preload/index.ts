@@ -78,6 +78,7 @@ const api = {
     directory: string
     favorite: number
     library_id: number
+    library_is_hidden: number
     created_at: string
     volumes: Array<{
       id: number
@@ -108,6 +109,7 @@ const api = {
     directory: string
     file: string | null
     favorite: number
+    library_is_hidden: number
     created_at: string
     chapters: Array<{
       id: number
@@ -202,25 +204,34 @@ const api = {
     ipcRenderer.invoke('clear-all-data'),
 
   // Tag APIs
-  listTags: (resource: string, search: string, limit?: number): Promise<Array<{ id: number; name: string }>> =>
-    ipcRenderer.invoke('list-tags', resource, search, limit),
+  listTags: (
+    resource: string,
+    search: string,
+    limit?: number,
+    includeHidden?: boolean
+  ): Promise<Array<{ id: number; name: string; is_hidden: number }>> =>
+    ipcRenderer.invoke('list-tags', resource, search, limit, includeHidden),
 
-  createTag: (name: string, resource: string): Promise<{ id: number; name: string; resource: string }> =>
-    ipcRenderer.invoke('create-tag', name, resource),
+  createTag: (
+    name: string,
+    resource: string,
+    isHidden?: boolean
+  ): Promise<{ id: number; name: string; resource: string; is_hidden: number }> =>
+    ipcRenderer.invoke('create-tag', name, resource, isHidden),
 
   getComicTags: (
     comicId: number
-  ): Promise<Array<{ id: number; name: string; direct: 0 | 1; count: number }>> =>
+  ): Promise<Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>> =>
     ipcRenderer.invoke('get-comic-tags', comicId),
 
   getVolumeTags: (
     volumeId: number
-  ): Promise<Array<{ id: number; name: string; direct: 0 | 1; count: number }>> =>
+  ): Promise<Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>> =>
     ipcRenderer.invoke('get-volume-tags', volumeId),
 
   getChapterTags: (
     chapterId: number
-  ): Promise<Array<{ id: number; name: string; direct: 1; count: number }>> =>
+  ): Promise<Array<{ id: number; name: string; is_hidden: number; direct: 1; count: number }>> =>
     ipcRenderer.invoke('get-chapter-tags', chapterId),
 
   attachTag: (
@@ -235,8 +246,19 @@ const api = {
     tagId: number
   ): Promise<void> => ipcRenderer.invoke('detach-tag', level, entityId, tagId),
 
-  getLibraryTags: (libraryId: number): Promise<Array<{ id: number; name: string }>> =>
+  getLibraryTags: (libraryId: number): Promise<Array<{ id: number; name: string; is_hidden: number }>> =>
     ipcRenderer.invoke('get-library-tags', libraryId),
+
+  getAllTags: (
+    search?: string,
+    includeHidden?: boolean
+  ): Promise<Array<{ id: number; name: string; resource: string; is_hidden: number }>> =>
+    ipcRenderer.invoke('get-all-tags', search, includeHidden),
+
+  updateTag: (id: number, opts: { name?: string; isHidden?: boolean }): Promise<boolean> =>
+    ipcRenderer.invoke('update-tag', id, opts),
+
+  deleteTag: (id: number): Promise<boolean> => ipcRenderer.invoke('delete-tag', id),
 
   onTagsUpdated: (callback: () => void): (() => void) => {
     const handler = (): void => callback()

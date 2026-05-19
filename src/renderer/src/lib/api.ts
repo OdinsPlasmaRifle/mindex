@@ -6,6 +6,7 @@ import type {
   Source,
   SourceWithStatus,
   Tag,
+  TagSummary,
   TagWithSource,
   TagLevel,
   TagResource
@@ -47,14 +48,17 @@ declare global {
       deleteLibrary(id: number): Promise<boolean>
       onNavigateAddLibrary(callback: () => void): () => void
       clearAllData(): Promise<void>
-      listTags(resource: TagResource, search: string, limit?: number): Promise<Array<{ id: number; name: string }>>
-      createTag(name: string, resource: TagResource): Promise<Tag>
+      listTags(resource: TagResource, search: string, limit?: number, includeHidden?: boolean): Promise<TagSummary[]>
+      createTag(name: string, resource: TagResource, isHidden?: boolean): Promise<Tag>
       getComicTags(comicId: number): Promise<TagWithSource[]>
       getVolumeTags(volumeId: number): Promise<TagWithSource[]>
       getChapterTags(chapterId: number): Promise<TagWithSource[]>
       attachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
       detachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
-      getLibraryTags(libraryId: number): Promise<Array<{ id: number; name: string }>>
+      getLibraryTags(libraryId: number): Promise<TagSummary[]>
+      getAllTags(search?: string, includeHidden?: boolean): Promise<Tag[]>
+      updateTag(id: number, opts: { name?: string; isHidden?: boolean }): Promise<boolean>
+      deleteTag(id: number): Promise<boolean>
       onTagsUpdated(callback: () => void): () => void
     }
   }

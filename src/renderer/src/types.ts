@@ -46,10 +46,12 @@ export interface Chapter {
 
 export interface VolumeWithChapters extends Volume {
   chapters: Chapter[]
+  library_is_hidden: number
 }
 
 export interface ComicWithVolumes extends Comic {
   volumes: VolumeWithChapters[]
+  library_is_hidden: number
 }
 
 export interface ComicsPage {
@@ -77,11 +79,19 @@ export interface Tag {
   id: number
   name: string
   resource: TagResource
+  is_hidden: number
+}
+
+export interface TagSummary {
+  id: number
+  name: string
+  is_hidden: number
 }
 
 export interface TagWithSource {
   id: number
   name: string
+  is_hidden: number
   direct: 0 | 1
   count: number
 }

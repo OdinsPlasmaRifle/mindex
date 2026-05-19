@@ -1,7 +1,206 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { showStatus } from '../components/StatusToast'
+
+interface TagRow {
+  id: number
+  name: string
+  resource: string
+  is_hidden: number
+}
+
+function HiddenIcon({ className = 'w-3.5 h-3.5' }: { className?: string }): React.JSX.Element {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+    </svg>
+  )
+}
+
+function TagManagementSection(): React.JSX.Element {
+  const [tags, setTags] = useState<TagRow[]>([])
+  const [search, setSearch] = useState('')
+  const [showHidden, setShowHidden] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+
+  const load = useCallback(async () => {
+    const result = await api.getAllTags(search, showHidden)
+    setTags(result)
+  }, [search, showHidden])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => api.onTagsUpdated(() => load()), [load])
+
+  const beginEdit = (tag: TagRow): void => {
+    setEditingId(tag.id)
+    setEditName(tag.name)
+  }
+
+  const cancelEdit = (): void => {
+    setEditingId(null)
+    setEditName('')
+  }
+
+  const saveEdit = async (id: number): Promise<void> => {
+    const trimmed = editName.trim()
+    if (!trimmed) return
+    await api.updateTag(id, { name: trimmed })
+    setEditingId(null)
+    setEditName('')
+  }
+
+  const toggleHidden = async (tag: TagRow): Promise<void> => {
+    await api.updateTag(tag.id, { isHidden: tag.is_hidden !== 1 })
+  }
+
+  const handleDelete = async (id: number): Promise<void> => {
+    await api.deleteTag(id)
+    setConfirmDeleteId(null)
+  }
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-lg font-semibold mb-3">Tags</h2>
+
+      <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tags..."
+            className="flex-1 text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
+          />
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1 text-sm rounded border transition-colors ${
+              showHidden
+                ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]'
+                : 'border-[var(--border)] hover:bg-[var(--secondary)]'
+            }`}
+          >
+            <HiddenIcon />
+            {showHidden ? 'Hide hidden' : 'Show hidden'}
+          </button>
+        </div>
+
+        {tags.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)] py-4 text-center">
+            {search ? 'No tags match your search.' : 'No tags yet.'}
+          </p>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {tags.map((tag) => {
+              const isEditing = editingId === tag.id
+              const isConfirming = confirmDeleteId === tag.id
+              return (
+                <li key={tag.id} className="flex items-center gap-2 py-2">
+                  <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEdit(tag.id)
+                          else if (e.key === 'Escape') cancelEdit()
+                        }}
+                        autoFocus
+                        className="text-sm px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
+                      />
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-sm">
+                        {tag.is_hidden === 1 && <HiddenIcon className="w-3 h-3 text-[var(--muted-foreground)]" />}
+                        {tag.name}
+                      </span>
+                    )}
+                    <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted-foreground)]">
+                      {tag.resource}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isEditing ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => saveEdit(tag.id)}
+                          disabled={!editName.trim()}
+                          className="px-2 py-0.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="px-2 py-0.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <label className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tag.is_hidden === 1}
+                            onChange={() => toggleHidden(tag)}
+                            className="cursor-pointer"
+                          />
+                          Hidden
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => beginEdit(tag)}
+                          className="px-2 py-0.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                        >
+                          Edit
+                        </button>
+                        {isConfirming ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(tag.id)}
+                              className="px-2 py-0.5 text-xs rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-2 py-0.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(tag.id)}
+                            className="px-2 py-0.5 text-xs rounded text-red-500 border border-red-500/30 hover:bg-red-500/10 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  )
+}
 
 export default function SettingsPage(): React.JSX.Element {
   const [hiddenEnabled, setHiddenEnabled] = useState(false)
@@ -51,6 +250,8 @@ export default function SettingsPage(): React.JSX.Element {
           </div>
         </div>
       </section>
+
+      <TagManagementSection />
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold mb-3">Data</h2>

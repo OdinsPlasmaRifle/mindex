@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -74,6 +74,7 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     resource TEXT NOT NULL CHECK(resource IN ('comics')),
+    is_hidden INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(name, resource)
   );
@@ -193,6 +194,11 @@ function migrateV4toV5(): void {
   db.prepare('UPDATE schema_version SET version = 5').run()
 }
 
+function migrateV5toV6(): void {
+  db.exec("ALTER TABLE tag ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0")
+  db.prepare('UPDATE schema_version SET version = 6').run()
+}
+
 function migrateV3toV4(): void {
   db.exec(`
     CREATE TABLE chapter_new (
@@ -244,6 +250,9 @@ export function initDb(): void {
         }
         if (versionRow.version < 5) {
           migrateV4toV5()
+        }
+        if (versionRow.version < 6) {
+          migrateV5toV6()
         }
       })
       migrate()

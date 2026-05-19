@@ -21,7 +21,7 @@ function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.Mo
   )
 }
 
-function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters; defaultOpen?: boolean }): React.JSX.Element {
+function VolumeAccordion({ vol, defaultOpen = false, libraryIsHidden }: { vol: VolumeWithChapters; defaultOpen?: boolean; libraryIsHidden: boolean }): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
   const [volFavorite, setVolFavorite] = useState(vol.favorite)
   const [chapterFavorites, setChapterFavorites] = useState<Record<number, number>>(
@@ -69,7 +69,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
             Volume {vol.number}
           </span>
           <div onClick={(e) => e.stopPropagation()}>
-            <TagPool level="volume" entityId={vol.id} resource="comics" size="compact" />
+            <TagPool level="volume" entityId={vol.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -117,7 +117,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
                     >
                       Chapter {ch.number}{ch.increment}
                     </span>
-                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" />
+                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
@@ -150,7 +150,7 @@ function VolumeAccordion({ vol, defaultOpen = false }: { vol: VolumeWithChapters
                     >
                       Extra {ex.number}
                     </span>
-                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" />
+                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
@@ -328,7 +328,7 @@ export default function ComicDetailPage(): React.JSX.Element {
               </button>
             </div>
             <div className="mt-3">
-              <TagPool level="comic" entityId={comic.id} resource="comics" />
+              <TagPool level="comic" entityId={comic.id} resource="comics" libraryIsHidden={comic.library_is_hidden === 1} />
             </div>
           </div>
         </div>
@@ -342,7 +342,7 @@ export default function ComicDetailPage(): React.JSX.Element {
             <h2 className="text-xl font-semibold mb-4">Volumes</h2>
             <div className="space-y-2">
               {comic.volumes.map((vol, i) => (
-                <VolumeAccordion key={vol.id} vol={vol} defaultOpen={i === 0} />
+                <VolumeAccordion key={vol.id} vol={vol} defaultOpen={i === 0} libraryIsHidden={comic.library_is_hidden === 1} />
               ))}
             </div>
           </div>
