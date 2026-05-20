@@ -136,8 +136,6 @@ function scanComicDir(
         existingVol.id
       )
       volumeId = existingVol.id
-      // Delete old chapters to re-import
-      db.prepare('DELETE FROM chapter WHERE volume_id = ?').run(volumeId)
     } else {
       const ins = db
         .prepare('INSERT INTO volume (comic_id, number, directory, file) VALUES (?, ?, ?, ?)')
@@ -145,7 +143,8 @@ function scanComicDir(
       volumeId = ins.lastInsertRowid as number
     }
 
-    // Process chapters and extras
+    // Upsert chapters and extras, preserving ids so tag associations and favorites survive
+    const seenChapterIds: number[] = []
     for (const f of volFiles) {
       if (!f.isFile() || !f.name.endsWith('.cbz')) continue
       // Skip the volume file itself
@@ -154,13 +153,30 @@ function scanComicDir(
       const chapterInfo = parseChapterNumber(f.name)
       if (!chapterInfo) continue
 
-      db.prepare('INSERT OR REPLACE INTO chapter (volume_id, number, increment, type, file) VALUES (?, ?, ?, ?, ?)').run(
-        volumeId,
-        chapterInfo.number,
-        chapterInfo.increment,
-        chapterInfo.type,
-        join(relVolDir, f.name)
-      )
+      const row = db
+        .prepare(
+          `INSERT INTO chapter (volume_id, number, increment, type, file) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(volume_id, number, increment, type) DO UPDATE SET file = excluded.file
+           RETURNING id`
+        )
+        .get(
+          volumeId,
+          chapterInfo.number,
+          chapterInfo.increment,
+          chapterInfo.type,
+          join(relVolDir, f.name)
+        ) as { id: number }
+      seenChapterIds.push(row.id)
+    }
+
+    // Remove chapter rows whose files no longer exist on disk
+    if (seenChapterIds.length === 0) {
+      db.prepare('DELETE FROM chapter WHERE volume_id = ?').run(volumeId)
+    } else {
+      const placeholders = seenChapterIds.map(() => '?').join(',')
+      db.prepare(
+        `DELETE FROM chapter WHERE volume_id = ? AND id NOT IN (${placeholders})`
+      ).run(volumeId, ...seenChapterIds)
     }
   }
 
