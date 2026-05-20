@@ -22,6 +22,7 @@ declare global {
       getRandomComic(libraryId: number): Promise<{ id: number } | null>
       getComic(id: number): Promise<ComicWithVolumes | null>
       getVolume(id: number): Promise<VolumeWithChapters | null>
+      deleteComic(id: number): Promise<boolean>
       refreshComic(id: number): Promise<boolean>
       toggleFavorite(id: number): Promise<boolean | null>
       toggleVolumeFavorite(id: number): Promise<boolean | null>

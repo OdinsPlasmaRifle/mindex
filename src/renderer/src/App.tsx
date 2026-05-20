@@ -8,6 +8,7 @@ import LibraryComicsPage from './pages/LibraryComicsPage'
 import AddLibraryPage from './pages/AddLibraryPage'
 import EditLibraryPage from './pages/EditLibraryPage'
 import ComicDetailPage from './pages/ComicDetailPage'
+import EditComicPage from './pages/EditComicPage'
 import VolumePage from './pages/VolumePage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -62,6 +63,7 @@ export default function App(): React.JSX.Element {
         <Route path="/library/:id" element={<LibraryComicsPage />} />
         <Route path="/library/:id/edit" element={<EditLibraryPage />} />
         <Route path="/comic/:id" element={<ComicDetailPage />} />
+        <Route path="/comic/:id/edit" element={<EditComicPage />} />
         <Route path="/volume/:id" element={<VolumePage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>

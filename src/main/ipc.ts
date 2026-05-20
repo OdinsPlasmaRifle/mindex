@@ -224,12 +224,16 @@ function refreshComic(comicId: number): boolean {
 
 export function clearAllData(): void {
   const db = getDb()
+  db.exec('DELETE FROM chapter_tag')
+  db.exec('DELETE FROM volume_tag')
+  db.exec('DELETE FROM comic_tag')
+  db.exec('DELETE FROM tag')
   db.exec('DELETE FROM chapter')
   db.exec('DELETE FROM volume')
   db.exec('DELETE FROM comic')
   db.exec('DELETE FROM source')
   db.exec('DELETE FROM library')
-  db.exec("DELETE FROM settings")
+  db.exec('DELETE FROM settings')
 }
 
 export function getLibrarySources(libraryId: number): Array<{ id: number; path: string; type: string; library_id: number }> {
@@ -575,6 +579,15 @@ export function registerIpcHandlers(): void {
     return refreshComic(id)
   })
 
+  ipcMain.handle('delete-comic', (event, id: number) => {
+    const db = getDb()
+    const result = db.prepare('DELETE FROM comic WHERE id = ?').run(id)
+    if (result.changes > 0) {
+      event.sender.send('comics-updated')
+    }
+    return result.changes > 0
+  })
+
   ipcMain.handle('toggle-favorite', (_event, id: number) => {
     const db = getDb()
     const comic = db.prepare('SELECT favorite FROM comic WHERE id = ?').get(id) as
@@ -724,6 +737,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('clear-all-data', (event) => {
     clearAllData()
     event.sender.send('comics-updated')
+    event.sender.send('tags-updated')
   })
 
   // Tag handlers

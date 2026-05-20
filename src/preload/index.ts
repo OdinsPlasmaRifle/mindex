@@ -125,6 +125,9 @@ const api = {
   refreshComic: (id: number): Promise<boolean> =>
     ipcRenderer.invoke('refresh-comic', id),
 
+  deleteComic: (id: number): Promise<boolean> =>
+    ipcRenderer.invoke('delete-comic', id),
+
   toggleFavorite: (id: number): Promise<boolean | null> =>
     ipcRenderer.invoke('toggle-favorite', id),
 
