@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 6
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -262,4 +262,14 @@ export function initDb(): void {
 
 export function getDb(): Database.Database {
   return db
+}
+
+export function closeDb(): void {
+  if (db) {
+    db.close()
+  }
+}
+
+export function getDbPath(): string {
+  return join(app.getPath('userData'), 'mindex.db')
 }

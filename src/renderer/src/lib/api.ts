@@ -49,6 +49,8 @@ declare global {
       deleteLibrary(id: number): Promise<boolean>
       onNavigateAddLibrary(callback: () => void): () => void
       clearAllData(): Promise<void>
+      exportBackup(): Promise<{ canceled: boolean; path?: string; error?: string }>
+      importBackup(): Promise<{ canceled: boolean; error?: string }>
       listTags(resource: TagResource, search: string, limit?: number, includeHidden?: boolean): Promise<TagSummary[]>
       createTag(name: string, resource: TagResource, isHidden?: boolean): Promise<Tag>
       getComicTags(comicId: number): Promise<TagWithSource[]>

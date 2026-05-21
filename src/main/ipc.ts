@@ -1,5 +1,6 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { getDb } from './db'
+import { exportBackup, importBackup } from './backup'
 import { readdirSync, existsSync } from 'fs'
 import { join, basename, extname, relative } from 'path'
 
@@ -754,6 +755,29 @@ export function registerIpcHandlers(): void {
     clearAllData()
     event.sender.send('comics-updated')
     event.sender.send('tags-updated')
+  })
+
+  ipcMain.handle('export-backup', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { canceled: true }
+    return exportBackup(win)
+  })
+
+  ipcMain.handle('import-backup', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { canceled: true }
+    const result = await importBackup(win)
+    if (!result.canceled && !result.error) {
+      const enabled = getHiddenContentEnabled()
+      const windows = BrowserWindow.getAllWindows()
+      for (const w of windows) {
+        w.webContents.send('comics-updated')
+        w.webContents.send('tags-updated')
+        w.webContents.send('hidden-content-toggled', enabled)
+      }
+      if (onMenuRebuild) onMenuRebuild()
+    }
+    return result
   })
 
   // Tag handlers

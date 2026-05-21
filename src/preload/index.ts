@@ -206,6 +206,12 @@ const api = {
   clearAllData: (): Promise<void> =>
     ipcRenderer.invoke('clear-all-data'),
 
+  exportBackup: (): Promise<{ canceled: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('export-backup'),
+
+  importBackup: (): Promise<{ canceled: boolean; error?: string }> =>
+    ipcRenderer.invoke('import-backup'),
+
   // Tag APIs
   listTags: (
     resource: string,

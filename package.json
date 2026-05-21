@@ -13,6 +13,8 @@
     "package:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.17",
     "better-sqlite3": "^11.0.0",
     "react-router-dom": "^7.0.0"
   },

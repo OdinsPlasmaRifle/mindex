@@ -206,6 +206,39 @@ export default function SettingsPage(): React.JSX.Element {
   const [hiddenEnabled, setHiddenEnabled] = useState(false)
   const [clearAllConfirm, setClearAllConfirm] = useState(false)
   const [clearAllText, setClearAllText] = useState('')
+  const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null)
+
+  const handleExport = async (): Promise<void> => {
+    setBackupBusy('export')
+    try {
+      const result = await api.exportBackup()
+      if (result.error) {
+        const dismiss = showStatus(`Backup failed: ${result.error}`)
+        setTimeout(dismiss, 5000)
+      } else if (!result.canceled) {
+        const dismiss = showStatus('Backup exported')
+        setTimeout(dismiss, 3000)
+      }
+    } finally {
+      setBackupBusy(null)
+    }
+  }
+
+  const handleImport = async (): Promise<void> => {
+    setBackupBusy('import')
+    try {
+      const result = await api.importBackup()
+      if (result.error) {
+        const dismiss = showStatus(`Import failed: ${result.error}`)
+        setTimeout(dismiss, 5000)
+      } else if (!result.canceled) {
+        const dismiss = showStatus('Backup imported')
+        setTimeout(dismiss, 3000)
+      }
+    } finally {
+      setBackupBusy(null)
+    }
+  }
 
   useEffect(() => {
     api.getHiddenContentEnabled().then(setHiddenEnabled)
@@ -255,6 +288,32 @@ export default function SettingsPage(): React.JSX.Element {
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold mb-3">Data</h2>
+
+        <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)] mb-3">
+          <h3 className="text-sm font-medium mb-1">Backup</h3>
+          <p className="text-sm text-[var(--muted-foreground)] mb-3">
+            Export all libraries, comics, tags, favorites, settings, and library cover images into a single <span className="font-mono">.mindex</span> file. Source manga files on disk are not included.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExport}
+              disabled={backupBusy !== null}
+              className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] disabled:opacity-50 transition-colors"
+            >
+              {backupBusy === 'export' ? 'Exporting...' : 'Export Backup'}
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={backupBusy !== null}
+              className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] hover:bg-[var(--secondary)] disabled:opacity-50 transition-colors"
+            >
+              {backupBusy === 'import' ? 'Importing...' : 'Import Backup'}
+            </button>
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)] mt-3">
+            Importing replaces all current data with the contents of the backup file.
+          </p>
+        </div>
 
         <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
           <h3 className="text-sm font-medium mb-1">Clear All Data</h3>
