@@ -20,7 +20,19 @@ function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.Mo
   )
 }
 
-function VolumeAccordion({ vol, defaultOpen = false, libraryIsHidden }: { vol: VolumeWithChapters; defaultOpen?: boolean; libraryIsHidden: boolean }): React.JSX.Element {
+function VolumeAccordion({
+  vol,
+  defaultOpen = false,
+  libraryIsHidden,
+  readChapterIds,
+  markChapterRead
+}: {
+  vol: VolumeWithChapters
+  defaultOpen?: boolean
+  libraryIsHidden: boolean
+  readChapterIds: Set<number>
+  markChapterRead: (id: number) => void
+}): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
   const [volFavorite, setVolFavorite] = useState(vol.favorite)
   const [chapterFavorites, setChapterFavorites] = useState<Record<number, number>>(
@@ -32,6 +44,11 @@ function VolumeAccordion({ vol, defaultOpen = false, libraryIsHidden }: { vol: V
 
   const handleOpen = async (filePath: string): Promise<void> => {
     await api.openFile(filePath)
+  }
+
+  const handleOpenChapter = (chId: number, filePath: string): void => {
+    markChapterRead(chId)
+    api.openFile(filePath)
   }
 
   const handleToggleVolFavorite = async (e: React.MouseEvent): Promise<void> => {
@@ -104,31 +121,34 @@ function VolumeAccordion({ vol, defaultOpen = false, libraryIsHidden }: { vol: V
         <div className="border-t border-[var(--border)]">
           {chapters.length > 0 && (
             <div>
-              {chapters.map((ch) => (
-                <div
-                  key={ch.id}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
-                    <span
-                      onClick={() => handleOpen(ch.file)}
-                      className="text-sm cursor-pointer hover:underline"
-                    >
-                      Chapter {ch.number}{ch.increment}
-                    </span>
-                    <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
+              {chapters.map((ch) => {
+                const isRead = readChapterIds.has(ch.id)
+                return (
+                  <div
+                    key={ch.id}
+                    className={`flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0 transition-colors ${isRead ? 'bg-[var(--secondary)]/40' : ''}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                      <span
+                        onClick={() => handleOpenChapter(ch.id, ch.file)}
+                        className="text-sm cursor-pointer hover:underline"
+                      >
+                        Chapter {ch.number}{ch.increment}
+                      </span>
+                      <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
+                      <button
+                        onClick={() => handleOpenChapter(ch.id, ch.file)}
+                        className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                      >
+                        Read
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
-                    <button
-                      onClick={() => handleOpen(ch.file)}
-                      className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
-                    >
-                      Read
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -137,31 +157,34 @@ function VolumeAccordion({ vol, defaultOpen = false, libraryIsHidden }: { vol: V
               <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] bg-[var(--secondary)] border-b border-[var(--border)]">
                 Extras
               </div>
-              {extras.map((ex) => (
-                <div
-                  key={ex.id}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-wrap">
-                    <span
-                      onClick={() => handleOpen(ex.file)}
-                      className="text-sm cursor-pointer hover:underline"
-                    >
-                      Extra {ex.number}
-                    </span>
-                    <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
+              {extras.map((ex) => {
+                const isRead = readChapterIds.has(ex.id)
+                return (
+                  <div
+                    key={ex.id}
+                    className={`flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border)] last:border-b-0 transition-colors ${isRead ? 'bg-[var(--secondary)]/40' : ''}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                      <span
+                        onClick={() => handleOpenChapter(ex.id, ex.file)}
+                        className="text-sm cursor-pointer hover:underline"
+                      >
+                        Extra {ex.number}
+                      </span>
+                      <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
+                      <button
+                        onClick={() => handleOpenChapter(ex.id, ex.file)}
+                        className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+                      >
+                        Read
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
-                    <button
-                      onClick={() => handleOpen(ex.file)}
-                      className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
-                    >
-                      Read
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -186,6 +209,16 @@ export default function ComicDetailPage(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [randomFlash, setRandomFlash] = useState(false)
+  const [readChapterIds, setReadChapterIds] = useState<Set<number>>(new Set())
+
+  const markChapterRead = (chId: number): void => {
+    setReadChapterIds((prev) => {
+      if (prev.has(chId)) return prev
+      const next = new Set(prev)
+      next.add(chId)
+      return next
+    })
+  }
 
   const loadComic = async (): Promise<void> => {
     if (!id) return
@@ -196,6 +229,7 @@ export default function ComicDetailPage(): React.JSX.Element {
 
   useEffect(() => {
     loadComic()
+    setReadChapterIds(new Set())
   }, [id, randomKey])
 
   useEffect(() => {
@@ -330,7 +364,14 @@ export default function ComicDetailPage(): React.JSX.Element {
             <h2 className="text-xl font-semibold mb-4">Volumes</h2>
             <div className="space-y-2">
               {comic.volumes.map((vol, i) => (
-                <VolumeAccordion key={vol.id} vol={vol} defaultOpen={i === 0} libraryIsHidden={comic.library_is_hidden === 1} />
+                <VolumeAccordion
+                  key={vol.id}
+                  vol={vol}
+                  defaultOpen={i === 0}
+                  libraryIsHidden={comic.library_is_hidden === 1}
+                  readChapterIds={readChapterIds}
+                  markChapterRead={markChapterRead}
+                />
               ))}
             </div>
           </div>

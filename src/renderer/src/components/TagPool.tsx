@@ -150,7 +150,7 @@ export default function TagPool({
         return tag.direct === 1 ? (
           <span
             key={tag.id}
-            className={`${chipBase} border-[var(--border)] bg-[var(--secondary)] text-[var(--secondary-foreground)]`}
+            className={`${chipBase} border-[var(--border)] text-[var(--foreground)]`}
             title={isHidden ? 'Hidden tag' : undefined}
           >
             {label}
@@ -168,7 +168,7 @@ export default function TagPool({
         ) : (
           <span
             key={tag.id}
-            className={`${chipBase} border-[var(--border)] text-[var(--foreground)]`}
+            className={`${chipBase} border-[var(--border)] bg-[var(--secondary)] text-[var(--secondary-foreground)]`}
             title={isHidden ? 'Hidden tag · inherited from a lower level' : 'Inherited from a lower level'}
           >
             {label}
