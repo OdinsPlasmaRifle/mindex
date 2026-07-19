@@ -4,31 +4,31 @@ import { api } from '../lib/api'
 import type { LibraryWithCount } from '../types'
 import LibraryCard from '../components/LibraryCard'
 import SearchBar from '../components/SearchBar'
+import { useHiddenContent } from '../lib/useHiddenContent'
 
-let savedHiddenFilter: 'hide' | 'include' | 'only' = 'hide'
+type HiddenFilter = 'hide' | 'include' | 'only'
+
+// Null means "the user hasn't picked one this session", so revealing hidden
+// content defaults to 'include'. Module-level, so it resets on app restart.
+let savedHiddenFilter: HiddenFilter | null = null
 
 export default function LibrariesPage(): React.JSX.Element {
   const [libraries, setLibraries] = useState<LibraryWithCount[]>([])
   const [search, setSearch] = useState('')
-  const [hiddenEnabled, setHiddenEnabled] = useState(false)
-  const [hiddenFilter, setHiddenFilter] = useState<'hide' | 'include' | 'only'>(savedHiddenFilter)
+  const { visible: hiddenVisible } = useHiddenContent()
+  const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter | null>(savedHiddenFilter)
   const [missingSourceLibraryIds, setMissingSourceLibraryIds] = useState<Set<number>>(new Set())
-
-  useEffect(() => {
-    api.getHiddenContentEnabled().then(setHiddenEnabled)
-  }, [])
-
-  useEffect(() => {
-    return api.onHiddenContentToggled((enabled) => {
-      setHiddenEnabled(enabled)
-    })
-  }, [])
 
   useEffect(() => {
     savedHiddenFilter = hiddenFilter
   }, [hiddenFilter])
 
-  const activeHiddenFilter = hiddenEnabled ? hiddenFilter : ('hide' as const)
+  // Concealing hidden content clears the choice so the next reveal starts at 'include'.
+  useEffect(() => {
+    if (!hiddenVisible) setHiddenFilter(null)
+  }, [hiddenVisible])
+
+  const activeHiddenFilter: HiddenFilter = hiddenVisible ? (hiddenFilter ?? 'include') : 'hide'
 
   const loadLibraries = useCallback(async () => {
     const result = await api.getLibraries(search || undefined, activeHiddenFilter)
@@ -58,10 +58,10 @@ export default function LibrariesPage(): React.JSX.Element {
     setSearch(value)
   }, [])
 
-  const filterButton = (value: 'hide' | 'include' | 'only', label: string): React.JSX.Element => (
+  const filterButton = (value: HiddenFilter, label: string): React.JSX.Element => (
     <button
       onClick={() => setHiddenFilter(value)}
-      className={`px-3 py-1 text-sm rounded border transition-colors ${hiddenFilter === value ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]' : 'border-[var(--border)] hover:bg-[var(--secondary)]'}`}
+      className={`px-3 py-1 text-sm rounded border transition-colors ${activeHiddenFilter === value ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]' : 'border-[var(--border)] hover:bg-[var(--secondary)]'}`}
     >
       {label}
     </button>
@@ -89,7 +89,7 @@ export default function LibrariesPage(): React.JSX.Element {
           <SearchBar value={search} onChange={handleSearch} placeholder="Search by name..." />
         </div>
 
-        {hiddenEnabled && (
+        {hiddenVisible && (
           <div className="flex gap-2 mb-4">
             {filterButton('hide', 'Exclude hidden')}
             {filterButton('include', 'Include hidden')}

@@ -2,7 +2,15 @@ import { app, BrowserWindow, Menu, protocol, net } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { initDb } from './db'
-import { registerIpcHandlers, getHiddenContentEnabled, setHiddenContentEnabled, setMenuRebuildCallback } from './ipc'
+import {
+  registerIpcHandlers,
+  getHiddenContentEnabled,
+  getHiddenContentVisible,
+  setHiddenContentVisible,
+  requestShowHiddenContent,
+  broadcastHiddenContentState,
+  setMenuRebuildCallback
+} from './ipc'
 import { pathToFileURL } from 'url'
 
 function buildMenu(): void {
@@ -61,19 +69,24 @@ function buildMenu(): void {
             }
           }
         },
-        { type: 'separator' },
-        {
-          label: 'Enable Hidden Content',
-          type: 'checkbox',
-          checked: hiddenEnabled,
-          click: (menuItem): void => {
-            setHiddenContentEnabled(menuItem.checked)
-            const windows = BrowserWindow.getAllWindows()
-            for (const w of windows) {
-              w.webContents.send('hidden-content-toggled', menuItem.checked)
-            }
-          }
-        }
+        ...(hiddenEnabled
+          ? [
+              { type: 'separator' as const },
+              {
+                label: 'Show/Hide Hidden Content',
+                type: 'checkbox' as const,
+                checked: getHiddenContentVisible(),
+                click: (menuItem: Electron.MenuItem): void => {
+                  if (menuItem.checked) {
+                    requestShowHiddenContent()
+                  } else {
+                    setHiddenContentVisible(false)
+                    broadcastHiddenContentState()
+                  }
+                }
+              }
+            ]
+          : [])
       ]
     },
     {

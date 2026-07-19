@@ -26,7 +26,10 @@ export default function TagFilterPool({
 
   useEffect(() => api.onTagsUpdated(() => load()), [load])
 
-  const cycle = (tagId: number): void => {
+  // Hidden tags enter/leave the filterable set when the toggle flips.
+  useEffect(() => api.onHiddenContentVisibilityChanged(() => load()), [load])
+
+  const cycle =(tagId: number): void => {
     const current = value[tagId]
     const next: Record<number, TagFilterState> = { ...value }
     if (current === undefined) {

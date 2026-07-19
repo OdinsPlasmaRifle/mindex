@@ -7,6 +7,7 @@ import type {
   SourceWithStatus,
   Tag,
   TagSummary,
+  TagWithCount,
   TagWithSource,
   TagLevel,
   TagResource
@@ -31,6 +32,14 @@ declare global {
       onHiddenContentToggled(callback: (enabled: boolean) => void): () => void
       getHiddenContentEnabled(): Promise<boolean>
       setHiddenContentEnabled(enabled: boolean): Promise<void>
+      onHiddenContentVisibilityChanged(callback: (visible: boolean) => void): () => void
+      getHiddenContentVisible(): Promise<boolean>
+      setHiddenContentVisible(visible: boolean, pin?: string): Promise<{ ok: boolean; error?: string }>
+      onHiddenContentPinRequired(callback: () => void): () => void
+      hasHiddenContentPin(): Promise<boolean>
+      verifyHiddenContentPin(pin: string): Promise<{ ok: boolean; error?: string }>
+      setHiddenContentPin(currentPin: string | null, newPin: string): Promise<{ ok: boolean; error?: string }>
+      clearHiddenContentPin(currentPin: string): Promise<{ ok: boolean; error?: string }>
       onNavigateSettings(callback: () => void): () => void
       getMissingSourcePaths(libraryId: number): Promise<string[]>
       pickSourceDirectory(): Promise<string | null>
@@ -59,7 +68,7 @@ declare global {
       attachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
       detachTag(level: TagLevel, entityId: number, tagId: number): Promise<void>
       getLibraryTags(libraryId: number): Promise<TagSummary[]>
-      getAllTags(search?: string, includeHidden?: boolean): Promise<Tag[]>
+      getAllTags(search?: string): Promise<TagWithCount[]>
       updateTag(id: number, opts: { name?: string; isHidden?: boolean }): Promise<boolean>
       deleteTag(id: number): Promise<boolean>
       onTagsUpdated(callback: () => void): () => void

@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import type { TagLevel, TagResource, TagWithSource } from '../types'
+import { useHiddenContent } from '../lib/useHiddenContent'
 
 interface TagPoolProps {
   level: TagLevel
@@ -39,8 +41,18 @@ export default function TagPool({
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [results, setResults] = useState<Array<{ id: number; name: string; is_hidden: number }>>([])
   const [createHidden, setCreateHidden] = useState(libraryIsHidden)
+  const { enabled: hiddenEnabled, visible: hiddenVisible } = useHiddenContent()
   const pickerRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  // The menu is portalled to <body> so surrounding cards with `overflow-hidden`
+  // cannot clip it; that means we position it ourselves against the button.
+  const [menuPos, setMenuPos] = useState<{
+    left: number
+    top?: number
+    bottom?: number
+    maxHeight: number
+  } | null>(null)
 
   const load = useCallback(async () => {
     const t = await fetchTags(level, entityId)
@@ -53,6 +65,9 @@ export default function TagPool({
 
   useEffect(() => api.onTagsUpdated(() => load()), [load])
 
+  // Hidden tags appear/disappear from the attached list when the toggle flips.
+  useEffect(() => api.onHiddenContentVisibilityChanged(() => load()), [load])
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300)
     return () => clearTimeout(timer)
@@ -61,20 +76,20 @@ export default function TagPool({
   useEffect(() => {
     if (!pickerOpen) return
     let cancelled = false
-    api.listTags(resource, debouncedQuery, 20, libraryIsHidden).then((r) => {
+    api.listTags(resource, debouncedQuery, 20, hiddenVisible).then((r) => {
       if (!cancelled) setResults(r)
     })
     return () => {
       cancelled = true
     }
-  }, [pickerOpen, debouncedQuery, resource, libraryIsHidden])
+  }, [pickerOpen, debouncedQuery, resource, hiddenVisible])
 
   useEffect(() => {
     if (!pickerOpen) return
     const onMouseDown = (e: MouseEvent): void => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPickerOpen(false)
-      }
+      const target = e.target as Node
+      if (pickerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setPickerOpen(false)
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setPickerOpen(false)
@@ -84,6 +99,43 @@ export default function TagPool({
     return () => {
       document.removeEventListener('mousedown', onMouseDown)
       document.removeEventListener('keydown', onKey)
+    }
+  }, [pickerOpen])
+
+  const MENU_WIDTH = 256 // matches w-64
+  const MENU_MARGIN = 8
+
+  useLayoutEffect(() => {
+    if (!pickerOpen) {
+      setMenuPos(null)
+      return
+    }
+    const reposition = (): void => {
+      const anchor = pickerRef.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const spaceBelow = vh - rect.bottom - MENU_MARGIN
+      const spaceAbove = rect.top - MENU_MARGIN
+      // Flip above the button when the space below is too cramped to be usable.
+      const flip = spaceBelow < 180 && spaceAbove > spaceBelow
+      const maxHeight = Math.max(120, flip ? spaceAbove : spaceBelow)
+      const left = Math.min(Math.max(MENU_MARGIN, rect.left), vw - MENU_WIDTH - MENU_MARGIN)
+      // Anchoring by `bottom` when flipped means we never need to know the menu's height.
+      setMenuPos(
+        flip
+          ? { left, bottom: vh - rect.top + 4, maxHeight }
+          : { left, top: rect.bottom + 4, maxHeight }
+      )
+    }
+    reposition()
+    window.addEventListener('resize', reposition)
+    // Capture phase so scrolling in any ancestor container keeps the menu anchored.
+    window.addEventListener('scroll', reposition, true)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
     }
   }, [pickerOpen])
 
@@ -118,7 +170,7 @@ export default function TagPool({
 
   const handleCreate = async (): Promise<void> => {
     if (!trimmed) return
-    const created = await api.createTag(trimmed, resource, createHidden)
+    const created = await api.createTag(trimmed, resource, hiddenEnabled && createHidden)
     await api.attachTag(level, entityId, created.id)
     setPickerOpen(false)
   }
@@ -189,9 +241,20 @@ export default function TagPool({
           {!compact && <span>Tag</span>}
         </button>
 
-        {pickerOpen && (
-          <div className="absolute z-20 left-0 top-full mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden">
-            <div className="p-2 border-b border-[var(--border)]">
+        {pickerOpen &&
+          menuPos &&
+          createPortal(
+            <div
+              ref={menuRef}
+              className="fixed z-50 w-64 rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-lg overflow-hidden flex flex-col"
+              style={{
+                left: menuPos.left,
+                top: menuPos.top,
+                bottom: menuPos.bottom,
+                maxHeight: menuPos.maxHeight
+              }}
+            >
+            <div className="p-2 border-b border-[var(--border)] shrink-0">
               <input
                 ref={inputRef}
                 type="text"
@@ -201,7 +264,7 @@ export default function TagPool({
                 placeholder="Search or create..."
                 className="w-full text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
               />
-              {showCreate && (
+              {showCreate && hiddenEnabled && (
                 <label className="mt-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] cursor-pointer">
                   <input
                     type="checkbox"
@@ -214,7 +277,7 @@ export default function TagPool({
                 </label>
               )}
             </div>
-            <div className="max-h-48 overflow-y-auto">
+            <div className="flex-1 min-h-0 max-h-48 overflow-y-auto">
               {filteredResults.map((r) => (
                 <button
                   key={r.id}
@@ -243,8 +306,9 @@ export default function TagPool({
                 </button>
               )}
             </div>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
       </div>
     </div>
   )

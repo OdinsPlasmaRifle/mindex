@@ -82,6 +82,11 @@ export interface Tag {
   is_hidden: number
 }
 
+/** A tag plus how many comics reference it at any level (comic/volume/chapter). */
+export interface TagWithCount extends Tag {
+  comic_count: number
+}
+
 export interface TagSummary {
   id: number
   name: string

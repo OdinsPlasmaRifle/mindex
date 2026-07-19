@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import { api } from './lib/api'
 import { showStatus } from './components/StatusToast'
 import StatusToast from './components/StatusToast'
+import HiddenContentToggle from './components/HiddenContentToggle'
 import LibrariesPage from './pages/LibrariesPage'
 import LibraryComicsPage from './pages/LibraryComicsPage'
 import AddLibraryPage from './pages/AddLibraryPage'
@@ -67,6 +68,7 @@ export default function App(): React.JSX.Element {
         <Route path="/volume/:id" element={<VolumePage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
+      <HiddenContentToggle />
       <StatusToast />
     </HashRouter>
   )

@@ -68,6 +68,41 @@ const api = {
   setHiddenContentEnabled: (enabled: boolean): Promise<void> =>
     ipcRenderer.invoke('set-hidden-content-enabled', enabled),
 
+  onHiddenContentVisibilityChanged: (callback: (visible: boolean) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: boolean): void => callback(visible)
+    ipcRenderer.on('hidden-content-visibility-changed', handler)
+    return () => ipcRenderer.removeListener('hidden-content-visibility-changed', handler)
+  },
+
+  getHiddenContentVisible: (): Promise<boolean> =>
+    ipcRenderer.invoke('get-hidden-content-visible'),
+
+  setHiddenContentVisible: (
+    visible: boolean,
+    pin?: string
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('set-hidden-content-visible', visible, pin),
+
+  onHiddenContentPinRequired: (callback: () => void): (() => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('hidden-content-pin-required', handler)
+    return () => ipcRenderer.removeListener('hidden-content-pin-required', handler)
+  },
+
+  hasHiddenContentPin: (): Promise<boolean> => ipcRenderer.invoke('has-hidden-content-pin'),
+
+  verifyHiddenContentPin: (pin: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('verify-hidden-content-pin', pin),
+
+  setHiddenContentPin: (
+    currentPin: string | null,
+    newPin: string
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('set-hidden-content-pin', currentPin, newPin),
+
+  clearHiddenContentPin: (currentPin: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('clear-hidden-content-pin', currentPin),
+
   getComic: (
     id: number
   ): Promise<{
@@ -259,10 +294,10 @@ const api = {
     ipcRenderer.invoke('get-library-tags', libraryId),
 
   getAllTags: (
-    search?: string,
-    includeHidden?: boolean
-  ): Promise<Array<{ id: number; name: string; resource: string; is_hidden: number }>> =>
-    ipcRenderer.invoke('get-all-tags', search, includeHidden),
+    search?: string
+  ): Promise<
+    Array<{ id: number; name: string; resource: string; is_hidden: number; comic_count: number }>
+  > => ipcRenderer.invoke('get-all-tags', search),
 
   updateTag: (id: number, opts: { name?: string; isHidden?: boolean }): Promise<boolean> =>
     ipcRenderer.invoke('update-tag', id, opts),

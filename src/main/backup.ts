@@ -1,4 +1,5 @@
 import AdmZip from 'adm-zip'
+import Database from 'better-sqlite3'
 import { app, dialog, BrowserWindow } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { extname, join } from 'path'
@@ -6,6 +7,7 @@ import { closeDb, getDb, getDbPath, initDb, SCHEMA_VERSION } from './db'
 
 const BACKUP_FORMAT_VERSION = 1
 const COVERS_DIR = 'library-covers'
+const PIN_KEY = 'hidden_content_pin'
 
 type ManifestCover = {
   library_id: number
@@ -43,6 +45,17 @@ export async function exportBackup(win: BrowserWindow): Promise<{ canceled: bool
   const tempDbPath = join(app.getPath('temp'), `mindex-export-${Date.now()}.db`)
   if (existsSync(tempDbPath)) unlinkSync(tempDbPath)
   db.prepare('VACUUM INTO ?').run(tempDbPath)
+
+  // The hidden-content PIN is deliberately not exported. Strip it from the
+  // copy (never the live DB), then VACUUM again so the freed page holding the
+  // hash isn't left recoverable in the file's slack space.
+  const tempDb = new Database(tempDbPath)
+  try {
+    tempDb.prepare('DELETE FROM settings WHERE key = ?').run(PIN_KEY)
+    tempDb.exec('VACUUM')
+  } finally {
+    tempDb.close()
+  }
 
   try {
     const libraries = db
@@ -136,7 +149,7 @@ export async function importBackup(
     type: 'warning',
     title: 'Replace All Data',
     message: 'Importing this backup will replace all current libraries, comics, tags, and settings.',
-    detail: 'This cannot be undone. Continue?',
+    detail: 'Your hidden content PIN on this device is kept. This cannot be undone. Continue?',
     buttons: ['Cancel', 'Replace'],
     defaultId: 0,
     cancelId: 0
@@ -147,6 +160,14 @@ export async function importBackup(
   const walPath = `${dbPath}-wal`
   const shmPath = `${dbPath}-shm`
   const coversDir = coversStorageDir()
+
+  // Backups never contain a PIN, so carry the local one across the swap.
+  // Without this, importing any backup would silently drop PIN protection.
+  const existingPin = (
+    getDb().prepare('SELECT value FROM settings WHERE key = ?').get(PIN_KEY) as
+      | { value: string }
+      | undefined
+  )?.value
 
   // Close current DB before swapping the file.
   closeDb()
@@ -172,6 +193,12 @@ export async function importBackup(
     // Reopen DB; initDb will run any migrations needed to bring an older backup up to current schema.
     initDb()
     const db = getDb()
+
+    if (existingPin) {
+      db.prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      ).run(PIN_KEY, existingPin)
+    }
 
     // Rewrite library.image_path to the freshly extracted cover locations, and clear stale paths.
     const updateStmt = db.prepare('UPDATE library SET image_path = ? WHERE id = ?')

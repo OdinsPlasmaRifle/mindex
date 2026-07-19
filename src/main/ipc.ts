@@ -3,6 +3,7 @@ import { getDb } from './db'
 import { exportBackup, importBackup } from './backup'
 import { readdirSync, existsSync } from 'fs'
 import { join, basename, extname, relative } from 'path'
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 
 let onMenuRebuild: (() => void) | null = null
 export function setMenuRebuildCallback(cb: () => void): void {
@@ -362,9 +363,12 @@ export function getLibraries(search?: string, hiddenFilter: 'hide' | 'include' |
     params.push(`%${search}%`)
   }
 
-  if (hiddenFilter === 'hide') {
+  // Hidden libraries are only ever reachable while hidden content is revealed.
+  const effectiveFilter = getHiddenContentVisible() ? hiddenFilter : 'hide'
+
+  if (effectiveFilter === 'hide') {
     conditions.push('l.is_hidden = 0')
-  } else if (hiddenFilter === 'only') {
+  } else if (effectiveFilter === 'only') {
     conditions.push('l.is_hidden = 1')
   }
 
@@ -442,6 +446,146 @@ export function setHiddenContentEnabled(enabled: boolean): void {
   db.prepare(
     "INSERT INTO settings (key, value) VALUES ('hidden_content_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   ).run(enabled ? '1' : '0')
+  // Turning the feature off always collapses hidden content back out of view.
+  if (!enabled) hiddenContentVisible = false
+}
+
+// Session-only: whether hidden content is currently revealed. Never persisted —
+// it resets to false every time the app starts.
+let hiddenContentVisible = false
+
+export function getHiddenContentVisible(): boolean {
+  return getHiddenContentEnabled() && hiddenContentVisible
+}
+
+export function setHiddenContentVisible(visible: boolean): void {
+  hiddenContentVisible = visible && getHiddenContentEnabled()
+}
+
+// --- Hidden content PIN -----------------------------------------------------
+// The PIN is stored only as a salted scrypt hash and is verified here in the
+// main process; the renderer never receives the hash and cannot bypass a check.
+
+export const PIN_LENGTH = 5
+
+const PIN_PATTERN = new RegExp(`^\\d{${PIN_LENGTH}}$`)
+
+function isValidPinFormat(pin: unknown): pin is string {
+  return typeof pin === 'string' && PIN_PATTERN.test(pin)
+}
+
+function readPinRecord(): { salt: Buffer; hash: Buffer } | null {
+  const db = getDb()
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'hidden_content_pin'").get() as
+    | { value: string }
+    | undefined
+  if (!row?.value) return null
+  const [scheme, saltHex, hashHex] = row.value.split('$')
+  if (scheme !== 'scrypt' || !saltHex || !hashHex) return null
+  return { salt: Buffer.from(saltHex, 'hex'), hash: Buffer.from(hashHex, 'hex') }
+}
+
+function writePinRecord(pin: string): void {
+  const salt = randomBytes(16)
+  const hash = scryptSync(pin, salt, 32)
+  getDb()
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES ('hidden_content_pin', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(`scrypt$${salt.toString('hex')}$${hash.toString('hex')}`)
+}
+
+export function hasHiddenContentPin(): boolean {
+  return readPinRecord() !== null
+}
+
+// Escalating delay after consecutive wrong PINs, so a 5-digit space isn't
+// trivially brute-forceable. Resets on success and on app restart.
+let failedPinAttempts = 0
+let pinLockedUntil = 0
+
+function pinLockRemainingMs(): number {
+  return Math.max(0, pinLockedUntil - Date.now())
+}
+
+export function verifyHiddenContentPin(pin: unknown): boolean {
+  const record = readPinRecord()
+  if (!record) return true // no PIN configured — nothing to check
+  if (pinLockRemainingMs() > 0) return false
+  if (!isValidPinFormat(pin)) return false
+
+  const candidate = scryptSync(pin, record.salt, record.hash.length)
+  const ok = candidate.length === record.hash.length && timingSafeEqual(candidate, record.hash)
+
+  if (ok) {
+    failedPinAttempts = 0
+    pinLockedUntil = 0
+  } else {
+    failedPinAttempts += 1
+    if (failedPinAttempts >= 3) {
+      pinLockedUntil = Date.now() + Math.min(30_000, 2 ** (failedPinAttempts - 3) * 1000)
+    }
+  }
+  return ok
+}
+
+/** Error text for a rejected PIN, accounting for an active lockout. */
+function pinFailureMessage(): string {
+  const wait = pinLockRemainingMs()
+  return wait > 0
+    ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)}s.`
+    : 'Current PIN is incorrect.'
+}
+
+export function setHiddenContentPin(
+  currentPin: unknown,
+  newPin: unknown
+): { ok: true } | { ok: false; error: string } {
+  if (hasHiddenContentPin() && !verifyHiddenContentPin(currentPin)) {
+    return { ok: false, error: pinFailureMessage() }
+  }
+  if (!isValidPinFormat(newPin)) {
+    return { ok: false, error: `PIN must be exactly ${PIN_LENGTH} digits.` }
+  }
+  writePinRecord(newPin)
+  return { ok: true }
+}
+
+export function clearHiddenContentPin(currentPin: unknown): { ok: true } | { ok: false; error: string } {
+  if (!hasHiddenContentPin()) return { ok: true }
+  if (!verifyHiddenContentPin(currentPin)) {
+    return { ok: false, error: pinFailureMessage() }
+  }
+  getDb().prepare("DELETE FROM settings WHERE key = 'hidden_content_pin'").run()
+  return { ok: true }
+}
+
+/**
+ * Reveal hidden content, prompting for the PIN first when one is configured.
+ * Used by both the menu item and the renderer's toggle button.
+ */
+export function requestShowHiddenContent(): void {
+  if (hasHiddenContentPin()) {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('hidden-content-pin-required')
+    }
+    // Revert the menu checkbox — nothing is revealed until the PIN is accepted.
+    if (onMenuRebuild) onMenuRebuild()
+    return
+  }
+  setHiddenContentVisible(true)
+  broadcastHiddenContentState()
+}
+
+/** Push the current enabled/visible pair to every window and rebuild the menu. */
+export function broadcastHiddenContentState(): void {
+  const enabled = getHiddenContentEnabled()
+  const visible = getHiddenContentVisible()
+  for (const w of BrowserWindow.getAllWindows()) {
+    w.webContents.send('hidden-content-toggled', enabled)
+    w.webContents.send('hidden-content-visibility-changed', visible)
+  }
+  if (onMenuRebuild) onMenuRebuild()
 }
 
 export function getMissingSourcePaths(libraryId: number): string[] {
@@ -654,11 +798,43 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('set-hidden-content-enabled', (_event, enabled: boolean) => {
     setHiddenContentEnabled(enabled)
-    const windows = BrowserWindow.getAllWindows()
-    for (const w of windows) {
-      w.webContents.send('hidden-content-toggled', enabled)
+    broadcastHiddenContentState()
+  })
+
+  ipcMain.handle('get-hidden-content-visible', () => {
+    return getHiddenContentVisible()
+  })
+
+  ipcMain.handle('set-hidden-content-visible', (_event, visible: boolean, pin?: string) => {
+    // Concealing never requires a PIN; revealing does when one is configured.
+    if (visible && hasHiddenContentPin() && !verifyHiddenContentPin(pin)) {
+      return { ok: false, error: 'Incorrect PIN.' }
     }
-    if (onMenuRebuild) onMenuRebuild()
+    setHiddenContentVisible(visible)
+    broadcastHiddenContentState()
+    return { ok: true }
+  })
+
+  ipcMain.handle('has-hidden-content-pin', () => {
+    return hasHiddenContentPin()
+  })
+
+  // Used to gate the first step of the change-PIN flow. Shares the same
+  // lockout counter as every other check, so it is not a free oracle.
+  ipcMain.handle('verify-hidden-content-pin', (_event, pin: string) => {
+    if (!hasHiddenContentPin()) return { ok: true }
+    if (!verifyHiddenContentPin(pin)) return { ok: false, error: pinFailureMessage() }
+    return { ok: true }
+  })
+
+  ipcMain.handle('set-hidden-content-pin', (_event, currentPin: string | null, newPin: string) => {
+    return setHiddenContentPin(currentPin, newPin)
+  })
+
+  ipcMain.handle('clear-hidden-content-pin', (_event, currentPin: string) => {
+    const result = clearHiddenContentPin(currentPin)
+    if (result.ok) broadcastHiddenContentState()
+    return result
   })
 
   ipcMain.handle('get-missing-source-paths', (_event, libraryId: number) => {
@@ -755,6 +931,9 @@ export function registerIpcHandlers(): void {
     clearAllData()
     event.sender.send('comics-updated')
     event.sender.send('tags-updated')
+    // The wipe removes the enabled setting and the PIN, so resync both.
+    setHiddenContentVisible(false)
+    broadcastHiddenContentState()
   })
 
   ipcMain.handle('export-backup', async (event) => {
@@ -768,14 +947,11 @@ export function registerIpcHandlers(): void {
     if (!win) return { canceled: true }
     const result = await importBackup(win)
     if (!result.canceled && !result.error) {
-      const enabled = getHiddenContentEnabled()
-      const windows = BrowserWindow.getAllWindows()
-      for (const w of windows) {
+      for (const w of BrowserWindow.getAllWindows()) {
         w.webContents.send('comics-updated')
         w.webContents.send('tags-updated')
-        w.webContents.send('hidden-content-toggled', enabled)
       }
-      if (onMenuRebuild) onMenuRebuild()
+      broadcastHiddenContentState()
     }
     return result
   })
@@ -791,7 +967,7 @@ export function registerIpcHandlers(): void {
       includeHidden: boolean = false
     ) => {
       const db = getDb()
-      const hiddenClause = includeHidden ? '' : ' AND is_hidden = 0'
+      const hiddenClause = includeHidden && getHiddenContentVisible() ? '' : ' AND is_hidden = 0'
       return db
         .prepare(
           `SELECT id, name, is_hidden FROM tag WHERE resource = ? AND name LIKE ?${hiddenClause} ORDER BY name COLLATE NOCASE ASC LIMIT ?`
@@ -823,6 +999,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-comic-tags', (_event, comicId: number) => {
     const db = getDb()
+    const hiddenClause = getHiddenContentVisible() ? '' : ' WHERE t.is_hidden = 0'
     return db
       .prepare(
         `WITH attachments AS (
@@ -837,7 +1014,7 @@ export function registerIpcHandlers(): void {
         SELECT t.id, t.name, t.is_hidden,
           MAX(CASE WHEN a.lvl = 'comic' THEN 1 ELSE 0 END) AS direct,
           COUNT(*) AS count
-        FROM tag t JOIN attachments a ON a.tag_id = t.id
+        FROM tag t JOIN attachments a ON a.tag_id = t.id${hiddenClause}
         GROUP BY t.id, t.name, t.is_hidden
         ORDER BY t.name COLLATE NOCASE ASC`
       )
@@ -846,6 +1023,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-volume-tags', (_event, volumeId: number) => {
     const db = getDb()
+    const hiddenClause = getHiddenContentVisible() ? '' : ' WHERE t.is_hidden = 0'
     return db
       .prepare(
         `WITH attachments AS (
@@ -856,7 +1034,7 @@ export function registerIpcHandlers(): void {
         SELECT t.id, t.name, t.is_hidden,
           MAX(CASE WHEN a.lvl = 'volume' THEN 1 ELSE 0 END) AS direct,
           COUNT(*) AS count
-        FROM tag t JOIN attachments a ON a.tag_id = t.id
+        FROM tag t JOIN attachments a ON a.tag_id = t.id${hiddenClause}
         GROUP BY t.id, t.name, t.is_hidden
         ORDER BY t.name COLLATE NOCASE ASC`
       )
@@ -865,9 +1043,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-chapter-tags', (_event, chapterId: number) => {
     const db = getDb()
+    const hiddenClause = getHiddenContentVisible() ? '' : ' AND t.is_hidden = 0'
     return db
       .prepare(
-        'SELECT t.id, t.name, t.is_hidden, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ? ORDER BY t.name COLLATE NOCASE ASC'
+        `SELECT t.id, t.name, t.is_hidden, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ?${hiddenClause} ORDER BY t.name COLLATE NOCASE ASC`
       )
       .all(chapterId) as Array<{ id: number; name: string; is_hidden: number; direct: 1; count: number }>
   })
@@ -904,14 +1083,33 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'get-all-tags',
-    (_event, search: string = '', includeHidden: boolean = false) => {
+    (_event, search: string = '') => {
       const db = getDb()
-      const hiddenClause = includeHidden ? '' : ' AND is_hidden = 0'
+      const visible = getHiddenContentVisible()
+      const hiddenClause = visible ? '' : ' AND t.is_hidden = 0'
+      // Comics in hidden libraries are unreachable while hidden content is concealed,
+      // so they must not be counted either.
+      const comicScope = visible
+        ? 'comic c'
+        : 'comic c JOIN library l ON l.id = c.library_id AND l.is_hidden = 0'
       return db
         .prepare(
-          `SELECT id, name, resource, is_hidden FROM tag WHERE name LIKE ?${hiddenClause} ORDER BY resource ASC, name COLLATE NOCASE ASC`
+          `SELECT t.id, t.name, t.resource, t.is_hidden,
+             (SELECT COUNT(*) FROM ${comicScope} WHERE
+               EXISTS (SELECT 1 FROM comic_tag ct WHERE ct.comic_id = c.id AND ct.tag_id = t.id)
+               OR EXISTS (SELECT 1 FROM volume v JOIN volume_tag vt ON vt.volume_id = v.id WHERE v.comic_id = c.id AND vt.tag_id = t.id)
+               OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id JOIN chapter_tag cht ON cht.chapter_id = ch.id WHERE v.comic_id = c.id AND cht.tag_id = t.id)
+             ) AS comic_count
+           FROM tag t WHERE t.name LIKE ?${hiddenClause}
+           ORDER BY t.resource ASC, t.name COLLATE NOCASE ASC`
         )
-        .all(`%${search}%`) as Array<{ id: number; name: string; resource: string; is_hidden: number }>
+        .all(`%${search}%`) as Array<{
+        id: number
+        name: string
+        resource: string
+        is_hidden: number
+        comic_count: number
+      }>
     }
   )
 
@@ -948,10 +1146,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('get-library-tags', (_event, libraryId: number) => {
     const db = getDb()
-    const library = db.prepare('SELECT is_hidden FROM library WHERE id = ?').get(libraryId) as
-      | { is_hidden: number }
-      | undefined
-    const hiddenClause = library?.is_hidden ? '' : ' AND t.is_hidden = 0'
+    const hiddenClause = getHiddenContentVisible() ? '' : ' AND t.is_hidden = 0'
     return db
       .prepare(
         `SELECT DISTINCT t.id, t.name, t.is_hidden FROM tag t

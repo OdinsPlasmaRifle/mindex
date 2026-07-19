@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { showStatus } from '../components/StatusToast'
+import PinSettings from '../components/PinSettings'
 
 interface TagRow {
   id: number
   name: string
   resource: string
   is_hidden: number
+  comic_count: number
 }
 
 function HiddenIcon({ className = 'w-3.5 h-3.5' }: { className?: string }): React.JSX.Element {
@@ -18,22 +20,24 @@ function HiddenIcon({ className = 'w-3.5 h-3.5' }: { className?: string }): Reac
   )
 }
 
-function TagManagementSection(): React.JSX.Element {
+function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): React.JSX.Element {
   const [tags, setTags] = useState<TagRow[]>([])
   const [search, setSearch] = useState('')
-  const [showHidden, setShowHidden] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
-    const result = await api.getAllTags(search, showHidden)
+    const result = await api.getAllTags(search)
     setTags(result)
-  }, [search, showHidden])
+  }, [search])
 
   useEffect(() => {
     load()
   }, [load])
+
+  // Revealing/concealing hidden content changes which tags the query returns.
+  useEffect(() => api.onHiddenContentVisibilityChanged(() => load()), [load])
 
   useEffect(() => api.onTagsUpdated(() => load()), [load])
 
@@ -77,18 +81,6 @@ function TagManagementSection(): React.JSX.Element {
             placeholder="Search tags..."
             className="flex-1 text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
           />
-          <button
-            type="button"
-            onClick={() => setShowHidden((v) => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1 text-sm rounded border transition-colors ${
-              showHidden
-                ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]'
-                : 'border-[var(--border)] hover:bg-[var(--secondary)]'
-            }`}
-          >
-            <HiddenIcon />
-            {showHidden ? 'Hide hidden' : 'Show hidden'}
-          </button>
         </div>
 
         {tags.length === 0 ? (
@@ -124,6 +116,12 @@ function TagManagementSection(): React.JSX.Element {
                     <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted-foreground)]">
                       {tag.resource}
                     </span>
+                    <span
+                      className="text-[11px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--muted-foreground)]"
+                      title={`${tag.comic_count} comic${tag.comic_count === 1 ? '' : 's'} tagged at the comic, volume or chapter level`}
+                    >
+                      {tag.comic_count} {tag.comic_count === 1 ? 'comic' : 'comics'}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -147,15 +145,17 @@ function TagManagementSection(): React.JSX.Element {
                       </>
                     ) : (
                       <>
-                        <label className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={tag.is_hidden === 1}
-                            onChange={() => toggleHidden(tag)}
-                            className="cursor-pointer"
-                          />
-                          Hidden
-                        </label>
+                        {hiddenEnabled && (
+                          <label className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={tag.is_hidden === 1}
+                              onChange={() => toggleHidden(tag)}
+                              className="cursor-pointer"
+                            />
+                            Hidden
+                          </label>
+                        )}
                         <button
                           type="button"
                           onClick={() => beginEdit(tag)}
@@ -266,7 +266,8 @@ export default function SettingsPage(): React.JSX.Element {
             <div>
               <h3 className="text-sm font-medium">Enable Hidden Content</h3>
               <p className="text-sm text-[var(--muted-foreground)]">
-                Show hidden libraries and allow filtering by visibility.
+                Enable support for hidden content, such as hiding/showing and setting content as
+                hidden.
               </p>
             </div>
             <button
@@ -281,10 +282,12 @@ export default function SettingsPage(): React.JSX.Element {
               />
             </button>
           </div>
+
+          {hiddenEnabled && <PinSettings />}
         </div>
       </section>
 
-      <TagManagementSection />
+      <TagManagementSection hiddenEnabled={hiddenEnabled} />
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold mb-3">Data</h2>
@@ -310,8 +313,19 @@ export default function SettingsPage(): React.JSX.Element {
               {backupBusy === 'import' ? 'Importing...' : 'Import Backup'}
             </button>
           </div>
+          <div className="mt-3 p-3 rounded-md border border-amber-500/30 bg-amber-500/5">
+            <p className="text-xs font-medium text-amber-500 mb-1">Backup files are not encrypted</p>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Anyone with the file can read its contents, so store it somewhere you trust. Your
+              hidden content PIN is <span className="font-medium">not</span> included in the backup
+              and stays on this device — after importing on another device you will need to set a
+              new PIN there.
+            </p>
+          </div>
+
           <p className="text-xs text-[var(--muted-foreground)] mt-3">
-            Importing replaces all current data with the contents of the backup file.
+            Importing replaces all current data with the contents of the backup file. Your PIN on
+            this device is kept.
           </p>
         </div>
 
