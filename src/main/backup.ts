@@ -14,6 +14,19 @@ const BACKUP_EXTENSION = 'mndx.bkp'
 /** Accepted on import so backups written before the rename still open. */
 const LEGACY_BACKUP_EXTENSION = 'mindex'
 
+/**
+ * Extension given to the *dialog* filters, which is not the same thing as the
+ * extension we write.
+ *
+ * The Windows save dialog compares only the final extension of the proposed name
+ * against the filter, so declaring the two-part `mndx.bkp` made it read
+ * `backup.mndx.bkp` as having extension `.bkp`, decide it did not match, and
+ * append the filter again — the doubled name appeared pre-filled in the dialog,
+ * before any of our code saw the path. Declaring `bkp` matches what Windows
+ * actually looks at, so it leaves the name alone.
+ */
+const DIALOG_EXTENSION = 'bkp'
+
 type ManifestCover = {
   library_id: number
   archive_path: string
@@ -38,12 +51,10 @@ const BACKUP_SUFFIX_RE = /\.(mndx\.bkp|mndx|bkp|mindex)$/i
 /**
  * Forces exactly one `.mndx.bkp` onto the path the save dialog returned.
  *
- * Native dialogs append the selected filter's extension whenever the file name
- * does not already end in something they recognise. Because this filter is
- * two-part, they treat a name ending in `.bkp` as not matching `mndx.bkp` and
- * append the whole thing again — so the default name comes back as
- * `name.mndx.bkp.mndx.bkp`. Stripping every trailing known suffix before adding
- * one handles that, a partial extension, and a legacy `.mindex` name alike.
+ * The dialog filter (see DIALOG_EXTENSION) keeps the name intact, but the user
+ * can still type anything — a bare name, a partial `.mndx`, or an older
+ * `.mindex` — and the dialog may append its own `.bkp`. Stripping every trailing
+ * known suffix before adding one normalises all of those to the same result.
  */
 function withBackupExtension(filePath: string): string {
   const dir = dirname(filePath)
@@ -67,7 +78,7 @@ export async function exportBackup(win: BrowserWindow): Promise<{ canceled: bool
   const result = await dialog.showSaveDialog(win, {
     title: 'Export Mindex Backup',
     defaultPath: defaultName,
-    filters: [{ name: 'Mindex Backup', extensions: [BACKUP_EXTENSION] }]
+    filters: [{ name: 'Mindex Backup', extensions: [DIALOG_EXTENSION] }]
   })
 
   if (result.canceled || !result.filePath) return { canceled: true }
@@ -138,8 +149,13 @@ export async function importBackup(
     title: 'Import Mindex Backup',
     properties: ['openFile'],
     filters: [
-      // The legacy single-extension form stays readable so older backups import.
-      { name: 'Mindex Backup', extensions: [BACKUP_EXTENSION, LEGACY_BACKUP_EXTENSION] },
+      // `bkp` is listed alongside the full form for the same reason as the save
+      // dialog: on Windows a filter of `mndx.bkp` matches nothing, which would
+      // hide the user's own backups from the file list.
+      {
+        name: 'Mindex Backup',
+        extensions: [BACKUP_EXTENSION, DIALOG_EXTENSION, LEGACY_BACKUP_EXTENSION]
+      },
       { name: 'All Files', extensions: ['*'] }
     ]
   })
