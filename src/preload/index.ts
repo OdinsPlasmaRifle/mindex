@@ -26,7 +26,9 @@ const api = {
     pageSize?: number,
     favoritesOnly?: boolean,
     includedTagIds?: number[],
-    excludedTagIds?: number[]
+    excludedTagIds?: number[],
+    sortBy?: string,
+    sortDir?: string
   ): Promise<{
     comics: Array<{
       id: number
@@ -50,7 +52,9 @@ const api = {
       pageSize,
       favoritesOnly,
       includedTagIds,
-      excludedTagIds
+      excludedTagIds,
+      sortBy,
+      sortDir
     ),
 
   getRandomComic: (libraryId: number): Promise<{ id: number } | null> =>
@@ -200,7 +204,7 @@ const api = {
   checkAllSourcesExist: (): Promise<Array<{ id: number; path: string; type: string; library_id: number | null; exists: boolean }>> =>
     ipcRenderer.invoke('check-all-sources-exist'),
 
-  updateSourcePath: (id: number): Promise<boolean> =>
+  updateSourcePath: (id: number): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('update-source-path', id),
 
   refreshSource: (id: number): Promise<{ imported: number; updated: number } | null> =>

@@ -183,7 +183,7 @@ export default function PinSettings(): React.JSX.Element {
         : `Choose a ${PIN_LENGTH}-digit PIN. You will need it every time you show hidden content.`
 
   return (
-    <div className="mt-4 pt-4 border-t border-[var(--border)]">
+    <div>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-medium">PIN</h3>

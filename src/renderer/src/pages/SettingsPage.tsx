@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { showStatus } from '../components/StatusToast'
+import { onHiddenContentToggled, onHiddenContentVisibilityChanged, onTagsUpdated } from '../lib/ipcEvents'
+import { showError, showSuccess } from '../components/StatusToast'
 import PinSettings from '../components/PinSettings'
+import { HiddenIcon } from '../components/icons'
 
 interface TagRow {
   id: number
@@ -12,17 +14,12 @@ interface TagRow {
   comic_count: number
 }
 
-function HiddenIcon({ className = 'w-3.5 h-3.5' }: { className?: string }): React.JSX.Element {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-    </svg>
-  )
-}
+const TAG_PREVIEW_COUNT = 10
 
 function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): React.JSX.Element {
   const [tags, setTags] = useState<TagRow[]>([])
   const [search, setSearch] = useState('')
+  const [showAll, setShowAll] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
@@ -36,10 +33,15 @@ function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): Re
     load()
   }, [load])
 
-  // Revealing/concealing hidden content changes which tags the query returns.
-  useEffect(() => api.onHiddenContentVisibilityChanged(() => load()), [load])
+  // A new search means a new result set, so start from the preview again.
+  useEffect(() => {
+    setShowAll(false)
+  }, [search])
 
-  useEffect(() => api.onTagsUpdated(() => load()), [load])
+  // Revealing/concealing hidden content changes which tags the query returns.
+  useEffect(() => onHiddenContentVisibilityChanged(() => load()), [load])
+
+  useEffect(() => onTagsUpdated(() => load()), [load])
 
   const beginEdit = (tag: TagRow): void => {
     setEditingId(tag.id)
@@ -68,6 +70,9 @@ function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): Re
     setConfirmDeleteId(null)
   }
 
+  const hiddenCount = tags.length - TAG_PREVIEW_COUNT
+  const visibleTags = showAll ? tags : tags.slice(0, TAG_PREVIEW_COUNT)
+
   return (
     <section className="mt-10">
       <h2 className="text-lg font-semibold mb-3">Tags</h2>
@@ -89,7 +94,7 @@ function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): Re
           </p>
         ) : (
           <ul className="divide-y divide-[var(--border)]">
-            {tags.map((tag) => {
+            {visibleTags.map((tag) => {
               const isEditing = editingId === tag.id
               const isConfirming = confirmDeleteId === tag.id
               return (
@@ -197,6 +202,23 @@ function TagManagementSection({ hiddenEnabled }: { hiddenEnabled: boolean }): Re
             })}
           </ul>
         )}
+
+        {hiddenCount > 0 && (
+          <div className="pt-3 mt-1 border-t border-[var(--border)] flex items-center justify-between gap-2">
+            <span className="text-xs text-[var(--muted-foreground)]">
+              {showAll
+                ? `Showing all ${tags.length} tags`
+                : `Showing ${TAG_PREVIEW_COUNT} of ${tags.length} tags`}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="px-2 py-0.5 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+            >
+              {showAll ? 'Show less' : `See all (${hiddenCount} more)`}
+            </button>
+          </div>
+        )}
       </div>
     </section>
   )
@@ -213,11 +235,9 @@ export default function SettingsPage(): React.JSX.Element {
     try {
       const result = await api.exportBackup()
       if (result.error) {
-        const dismiss = showStatus(`Backup failed: ${result.error}`)
-        setTimeout(dismiss, 5000)
+        showError(`Backup failed: ${result.error}`)
       } else if (!result.canceled) {
-        const dismiss = showStatus('Backup exported')
-        setTimeout(dismiss, 3000)
+        showSuccess('Backup exported')
       }
     } finally {
       setBackupBusy(null)
@@ -229,11 +249,9 @@ export default function SettingsPage(): React.JSX.Element {
     try {
       const result = await api.importBackup()
       if (result.error) {
-        const dismiss = showStatus(`Import failed: ${result.error}`)
-        setTimeout(dismiss, 5000)
+        showError(`Import failed: ${result.error}`)
       } else if (!result.canceled) {
-        const dismiss = showStatus('Backup imported')
-        setTimeout(dismiss, 3000)
+        showSuccess('Backup imported')
       }
     } finally {
       setBackupBusy(null)
@@ -245,7 +263,7 @@ export default function SettingsPage(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    return api.onHiddenContentToggled((enabled) => {
+    return onHiddenContentToggled((enabled) => {
       setHiddenEnabled(enabled)
     })
   }, [])
@@ -282,10 +300,18 @@ export default function SettingsPage(): React.JSX.Element {
               />
             </button>
           </div>
-
-          {hiddenEnabled && <PinSettings />}
         </div>
       </section>
+
+      {hiddenEnabled && (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold mb-3">Security</h2>
+
+          <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
+            <PinSettings />
+          </div>
+        </section>
+      )}
 
       <TagManagementSection hiddenEnabled={hiddenEnabled} />
 
@@ -295,7 +321,7 @@ export default function SettingsPage(): React.JSX.Element {
         <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)] mb-3">
           <h3 className="text-sm font-medium mb-1">Backup</h3>
           <p className="text-sm text-[var(--muted-foreground)] mb-3">
-            Export all libraries, comics, tags, favorites, settings, and library cover images into a single <span className="font-mono">.mindex</span> file. Source manga files on disk are not included.
+            Export all libraries, comics, tags, favorites, settings, and library cover images into a single <span className="font-mono">.mndx.bkp</span> file. Source manga files on disk are not included.
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -361,8 +387,7 @@ export default function SettingsPage(): React.JSX.Element {
                     await api.clearAllData()
                     setClearAllConfirm(false)
                     setClearAllText('')
-                    const dismiss = showStatus('All data cleared')
-                    setTimeout(dismiss, 3000)
+                    showSuccess('All data cleared')
                   }}
                   disabled={clearAllText !== 'DELETE'}
                   className="px-3 py-1.5 text-sm rounded-md bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"

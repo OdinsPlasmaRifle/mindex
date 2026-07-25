@@ -1,8 +1,10 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
+import { onHiddenContentVisibilityChanged, onTagsUpdated } from '../lib/ipcEvents'
 import type { TagLevel, TagResource, TagWithSource } from '../types'
 import { useHiddenContent } from '../lib/useHiddenContent'
+import { CloseIcon, HiddenIcon, PlusIcon } from './icons'
 
 interface TagPoolProps {
   level: TagLevel
@@ -17,14 +19,6 @@ async function fetchTags(level: TagLevel, entityId: number): Promise<TagWithSour
   if (level === 'comic') return api.getComicTags(entityId)
   if (level === 'volume') return api.getVolumeTags(entityId)
   return api.getChapterTags(entityId)
-}
-
-function HiddenIcon({ className = 'w-3 h-3' }: { className?: string }): React.JSX.Element {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-    </svg>
-  )
 }
 
 export default function TagPool({
@@ -63,10 +57,10 @@ export default function TagPool({
     load()
   }, [load])
 
-  useEffect(() => api.onTagsUpdated(() => load()), [load])
+  useEffect(() => onTagsUpdated(() => load()), [load])
 
   // Hidden tags appear/disappear from the attached list when the toggle flips.
-  useEffect(() => api.onHiddenContentVisibilityChanged(() => load()), [load])
+  useEffect(() => onHiddenContentVisibilityChanged(() => load()), [load])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300)
@@ -212,9 +206,7 @@ export default function TagPool({
               className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors leading-none"
               aria-label={`Remove tag ${tag.name}`}
             >
-              <svg className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <CloseIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </button>
           </span>
         ) : (
@@ -235,9 +227,7 @@ export default function TagPool({
           className={`${chipBase} border-dashed border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--secondary)] transition-colors cursor-pointer`}
           aria-label="Add tag"
         >
-          <svg className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+          <PlusIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
           {!compact && <span>Tag</span>}
         </button>
 
@@ -298,9 +288,7 @@ export default function TagPool({
                   onClick={handleCreate}
                   className="w-full text-left text-sm px-3 py-1.5 hover:bg-[var(--secondary)] transition-colors border-t border-[var(--border)] flex items-center gap-1.5"
                 >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
+                  <PlusIcon className="w-3.5 h-3.5" />
                   {createHidden && <HiddenIcon className="w-3 h-3" />}
                   Create &ldquo;{trimmed}&rdquo;
                 </button>

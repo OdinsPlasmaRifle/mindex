@@ -1,23 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { openFile } from '../lib/openFile'
 import TagPool from '../components/TagPool'
 import type { VolumeWithChapters } from '../types'
-
-function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }): React.JSX.Element {
-  return (
-    <svg
-      className="w-4 h-4 cursor-pointer hover:opacity-75 transition-opacity"
-      viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth={2}
-      onClick={onClick}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-    </svg>
-  )
-}
+import { HeartToggle } from '../components/icons'
+import PageMessage from '../components/PageMessage'
 
 export default function VolumePage(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -39,26 +27,18 @@ export default function VolumePage(): React.JSX.Element {
   }, [id])
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    )
+    return <PageMessage>Loading...</PageMessage>
   }
 
   if (!volume) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Volume not found.
-      </div>
-    )
+    return <PageMessage>Volume not found.</PageMessage>
   }
 
   const chapters = volume.chapters.filter((c) => c.type === 'chapter')
   const extras = volume.chapters.filter((c) => c.type === 'extra')
 
   const handleOpen = async (filePath: string): Promise<void> => {
-    await api.openFile(filePath)
+    await openFile(filePath)
   }
 
   const handleToggleVolFavorite = async (e: React.MouseEvent): Promise<void> => {
@@ -94,7 +74,7 @@ export default function VolumePage(): React.JSX.Element {
                 Read Full Volume
               </button>
             )}
-            <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
+            <HeartToggle filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           </div>
           <div className="mt-3">
             <TagPool level="volume" entityId={volume.id} resource="comics" libraryIsHidden={volume.library_is_hidden === 1} />
@@ -115,7 +95,7 @@ export default function VolumePage(): React.JSX.Element {
                     <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
+                    <HeartToggle filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                     <button
                       onClick={() => handleOpen(ch.file)}
                       className="px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
@@ -143,7 +123,7 @@ export default function VolumePage(): React.JSX.Element {
                     <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
+                    <HeartToggle filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                     <button
                       onClick={() => handleOpen(ex.file)}
                       className="px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"

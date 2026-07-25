@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { CloseIcon } from './icons'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 5
@@ -119,9 +120,7 @@ export default function ImageLightbox({ src, alt, onClose }: ImageLightboxProps)
         onClick={onClose}
         className="absolute top-4 right-4 z-10 text-white/70 hover:text-white transition-colors cursor-pointer"
       >
-        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
+        <CloseIcon className="w-8 h-8" />
       </button>
 
       {/* Controls */}

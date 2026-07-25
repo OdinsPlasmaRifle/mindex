@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import { api } from './lib/api'
+import { onImportFinished, onImportStarted } from './lib/ipcEvents'
 import { showStatus } from './components/StatusToast'
 import StatusToast from './components/StatusToast'
 import HiddenContentToggle from './components/HiddenContentToggle'
@@ -16,10 +17,10 @@ import SettingsPage from './pages/SettingsPage'
 function useImportStatus(): void {
   useEffect(() => {
     let dismiss: (() => void) | null = null
-    const unsubStart = api.onImportStarted(() => {
+    const unsubStart = onImportStarted(() => {
       dismiss = showStatus('Importing...')
     })
-    const unsubEnd = api.onImportFinished(() => {
+    const unsubEnd = onImportFinished(() => {
       dismiss?.()
       dismiss = null
     })

@@ -10,7 +10,9 @@ import type {
   TagWithCount,
   TagWithSource,
   TagLevel,
-  TagResource
+  TagResource,
+  ComicSortBy,
+  SortDir
 } from '../types'
 
 declare global {
@@ -19,7 +21,7 @@ declare global {
       onComicsUpdated(callback: () => void): () => void
       onImportStarted(callback: () => void): () => void
       onImportFinished(callback: () => void): () => void
-      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean, includedTagIds?: number[], excludedTagIds?: number[]): Promise<ComicsPage>
+      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean, includedTagIds?: number[], excludedTagIds?: number[], sortBy?: ComicSortBy, sortDir?: SortDir): Promise<ComicsPage>
       getRandomComic(libraryId: number): Promise<{ id: number } | null>
       getComic(id: number): Promise<ComicWithVolumes | null>
       getVolume(id: number): Promise<VolumeWithChapters | null>
@@ -47,7 +49,7 @@ declare global {
       getLibrarySources(libraryId: number): Promise<Source[]>
       checkLibrarySourcesExist(libraryId: number): Promise<SourceWithStatus[]>
       checkAllSourcesExist(): Promise<Array<SourceWithStatus & { library_id: number | null }>>
-      updateSourcePath(id: number): Promise<boolean>
+      updateSourcePath(id: number): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
       refreshSource(id: number): Promise<{ imported: number; updated: number } | null>
       clearSource(id: number): Promise<boolean>
       createLibrary(opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }, sourcePaths?: string[]): Promise<{ id: number; sourceResults?: Array<{ path: string; imported: number; updated: number }> }>

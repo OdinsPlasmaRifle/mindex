@@ -9,6 +9,11 @@ const BACKUP_FORMAT_VERSION = 1
 const COVERS_DIR = 'library-covers'
 const PIN_KEY = 'hidden_content_pin'
 
+/** Written by export and offered first on import. */
+const BACKUP_EXTENSION = 'mndx.bkp'
+/** Accepted on import so backups written before the rename still open. */
+const LEGACY_BACKUP_EXTENSION = 'mindex'
+
 type ManifestCover = {
   library_id: number
   archive_path: string
@@ -29,15 +34,23 @@ function coversStorageDir(): string {
 
 export async function exportBackup(win: BrowserWindow): Promise<{ canceled: boolean; path?: string }> {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const defaultName = `mindex-backup-${stamp}.mindex`
+  const defaultName = `mindex-backup-${stamp}.${BACKUP_EXTENSION}`
 
   const result = await dialog.showSaveDialog(win, {
     title: 'Export Mindex Backup',
     defaultPath: defaultName,
-    filters: [{ name: 'Mindex Backup', extensions: ['mindex'] }]
+    filters: [{ name: 'Mindex Backup', extensions: [BACKUP_EXTENSION] }]
   })
 
   if (result.canceled || !result.filePath) return { canceled: true }
+
+  // Native save dialogs only auto-append a single trailing extension, so a
+  // two-part one like .mndx.bkp has to be enforced here. A partial or legacy
+  // extension is replaced rather than stacked onto, so overwriting an older
+  // backup by name does not produce "name.mindex.mndx.bkp".
+  const outputPath = result.filePath.endsWith(`.${BACKUP_EXTENSION}`)
+    ? result.filePath
+    : `${result.filePath.replace(/\.(mndx|bkp|mindex)$/i, '')}.${BACKUP_EXTENSION}`
 
   const db = getDb()
 
@@ -88,9 +101,9 @@ export async function exportBackup(win: BrowserWindow): Promise<{ canceled: bool
     zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'))
     zip.addLocalFile(tempDbPath, '', 'mindex.db')
 
-    zip.writeZip(result.filePath)
+    zip.writeZip(outputPath)
 
-    return { canceled: false, path: result.filePath }
+    return { canceled: false, path: outputPath }
   } finally {
     if (existsSync(tempDbPath)) unlinkSync(tempDbPath)
   }
@@ -103,7 +116,8 @@ export async function importBackup(
     title: 'Import Mindex Backup',
     properties: ['openFile'],
     filters: [
-      { name: 'Mindex Backup', extensions: ['mindex'] },
+      // The legacy single-extension form stays readable so older backups import.
+      { name: 'Mindex Backup', extensions: [BACKUP_EXTENSION, LEGACY_BACKUP_EXTENSION] },
       { name: 'All Files', extensions: ['*'] }
     ]
   })

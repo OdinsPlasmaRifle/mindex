@@ -1,24 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { api, localFileUrl } from '../lib/api'
+import { openFile } from '../lib/openFile'
 import ImageLightbox from '../components/ImageLightbox'
 import TagPool from '../components/TagPool'
 import type { ComicWithVolumes, VolumeWithChapters } from '../types'
-
-function HeartIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }): React.JSX.Element {
-  return (
-    <svg
-      className="w-4 h-4 cursor-pointer hover:opacity-75 transition-opacity"
-      viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth={2}
-      onClick={onClick}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-    </svg>
-  )
-}
+import { ChevronDownIcon, CogIcon, HeartIcon, HeartToggle, ShuffleIcon } from '../components/icons'
+import PageMessage from '../components/PageMessage'
 
 function VolumeAccordion({
   vol,
@@ -43,12 +31,12 @@ function VolumeAccordion({
   const extras = vol.chapters.filter((c) => c.type === 'extra')
 
   const handleOpen = async (filePath: string): Promise<void> => {
-    await api.openFile(filePath)
+    await openFile(filePath)
   }
 
   const handleOpenChapter = (chId: number, filePath: string): void => {
     markChapterRead(chId)
-    api.openFile(filePath)
+    void openFile(filePath)
   }
 
   const handleToggleVolFavorite = async (e: React.MouseEvent): Promise<void> => {
@@ -89,7 +77,7 @@ function VolumeAccordion({
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <HeartIcon filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
+          <HeartToggle filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           {vol.file && (
             <span
               role="button"
@@ -105,15 +93,9 @@ function VolumeAccordion({
           <span className="text-xs text-[var(--muted-foreground)]">
             {chapters.length} ch{extras.length > 0 ? ` + ${extras.length} extra` : ''}
           </span>
-          <svg
+          <ChevronDownIcon
             className={`w-4 h-4 text-[var(--muted-foreground)] transition-transform ${open ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
+          />
         </div>
       </div>
 
@@ -138,7 +120,7 @@ function VolumeAccordion({
                       <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <HeartIcon filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
+                      <HeartToggle filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                       <button
                         onClick={() => handleOpenChapter(ch.id, ch.file)}
                         className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
@@ -174,7 +156,7 @@ function VolumeAccordion({
                       <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <HeartIcon filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
+                      <HeartToggle filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                       <button
                         onClick={() => handleOpenChapter(ex.id, ex.file)}
                         className="px-3 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
@@ -257,19 +239,11 @@ export default function ComicDetailPage(): React.JSX.Element {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    )
+    return <PageMessage>Loading...</PageMessage>
   }
 
   if (!comic) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Comic not found.
-      </div>
-    )
+    return <PageMessage>Comic not found.</PageMessage>
   }
 
   return (
@@ -315,15 +289,13 @@ export default function ComicDetailPage(): React.JSX.Element {
                   onClick={handleRandomAgain}
                   className={`flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors${randomFlash ? ' animate-flash' : ''}`}
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
-                  </svg>
+                  <ShuffleIcon />
                   Random again
                 </button>
               )}
               {comic.volumes.length > 0 && comic.volumes[0].file && (
                 <button
-                  onClick={() => api.openFile(comic.volumes[0].file!)}
+                  onClick={() => void openFile(comic.volumes[0].file)}
                   className="px-3 py-1 text-sm rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
                 >
                   Start reading
@@ -333,9 +305,7 @@ export default function ComicDetailPage(): React.JSX.Element {
                 onClick={handleToggleFavorite}
                 className="px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
               >
-                <svg className="w-4 h-4 inline-block mr-1 -mt-0.5" viewBox="0 0 24 24" fill={comic.favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-                </svg>
+                <HeartIcon className="w-4 h-4 inline-block mr-1 -mt-0.5" filled={comic.favorite === 1} />
                 {comic.favorite ? 'Remove from favorites' : 'Add to favorites'}
               </button>
               <button
@@ -343,10 +313,7 @@ export default function ComicDetailPage(): React.JSX.Element {
                 title="Edit comic"
                 className="px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+                <CogIcon className="w-4 h-4" />
               </button>
             </div>
             <div className="mt-3">

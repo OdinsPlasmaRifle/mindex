@@ -1,599 +1,61 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
-import { getDb } from './db'
+import { existsSync } from 'fs'
+import { basename } from 'path'
+import { pathToFileURL } from 'url'
 import { exportBackup, importBackup } from './backup'
-import { readdirSync, existsSync } from 'fs'
-import { join, basename, extname, relative } from 'path'
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
+import {
+  deleteComic,
+  getComic,
+  getComics,
+  getRandomComicId,
+  getVolume,
+  toggleFavorite
+} from './comics'
+import {
+  broadcastHiddenContentState,
+  clearHiddenContentPin,
+  getHiddenContentEnabled,
+  getHiddenContentVisible,
+  hasHiddenContentPin,
+  pinFailureMessage,
+  setHiddenContentEnabled,
+  setHiddenContentPin,
+  setHiddenContentVisible,
+  verifyHiddenContentPin
+} from './hiddenContent'
+import {
+  addSource,
+  checkAllSourcesExist,
+  checkLibrarySourcesExist,
+  clearAllData,
+  clearSource,
+  createLibrary,
+  deleteLibrary,
+  getLibraries,
+  getLibrary,
+  getLibrarySources,
+  getMissingSourcePaths,
+  pickLibraryImage,
+  pickSourceDirectory,
+  refreshSource,
+  updateLibrary,
+  updateSourcePath
+} from './library'
+import { refreshComic } from './scan'
+import { registerTagHandlers } from './tags'
 
-let onMenuRebuild: (() => void) | null = null
-export function setMenuRebuildCallback(cb: () => void): void {
-  onMenuRebuild = cb
-}
+// IPC wiring only. Each handler normalises its arguments and delegates to the
+// module that owns the behaviour, so channel names stay in one place and the
+// domain logic stays readable without Electron in the way.
 
-const TAG_VISIBLE_SQL = `(
-  EXISTS (SELECT 1 FROM comic_tag ct WHERE ct.comic_id = c.id AND ct.tag_id = ?)
-  OR EXISTS (SELECT 1 FROM volume v JOIN volume_tag vt ON vt.volume_id = v.id WHERE v.comic_id = c.id AND vt.tag_id = ?)
-  OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id JOIN chapter_tag cht ON cht.chapter_id = ch.id WHERE v.comic_id = c.id AND cht.tag_id = ?)
-)`
-
-function parseComicFolder(name: string): { name: string; author: string } | null {
-  const match = name.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
-  if (!match) return null
-  return { name: match[1].trim(), author: match[2].trim() }
-}
-
-function parseVolumeNumber(name: string): number | null {
-  const match = name.match(/Vol\.\s*(\d+)/i)
-  return match ? parseInt(match[1], 10) : null
-}
-
-function parseChapterNumber(name: string): { number: number; increment: string; type: 'chapter' | 'extra' } | null {
-  const extraMatch = name.match(/Extra\s*(\d+)/i)
-  if (extraMatch) return { number: parseInt(extraMatch[1], 10), increment: '', type: 'extra' }
-
-  const chMatch = name.match(/Ch\.\s*(\d+)([a-z])?/i)
-  if (chMatch) return { number: parseInt(chMatch[1], 10), increment: (chMatch[2] || '').toLowerCase(), type: 'chapter' }
-
-  return null
-}
-
-function isImageFile(name: string): boolean {
-  const ext = extname(name).toLowerCase()
-  return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(ext)
-}
-
-function resolveSourcePath(sourcePath: string, relativePath: string | null): string | null {
-  if (!relativePath) return null
-  return join(sourcePath, relativePath)
-}
-
-function scanComicDir(
-  db: ReturnType<typeof getDb>,
-  comicDir: string,
-  parsed: { name: string; author: string },
-  libraryId: number,
-  sourceRoot: string,
-  sourceId: number
-): 'imported' | 'updated' {
-  const relBase = relative(sourceRoot, comicDir)
-
-  // Find icon/cover image
-  let relImagePath: string | null = null
-  const comicFiles = readdirSync(comicDir, { withFileTypes: true })
-  for (const f of comicFiles) {
-    if (f.isFile() && isImageFile(f.name)) {
-      if (f.name.toLowerCase().includes('icon') || f.name.toLowerCase().includes('cover')) {
-        relImagePath = join(relBase, f.name)
-        break
-      }
-      if (!relImagePath) {
-        relImagePath = join(relBase, f.name)
-      }
-    }
+/** Notifies every window, not just the sender — other windows show the same data. */
+function broadcast(...channels: string[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    for (const channel of channels) win.webContents.send(channel)
   }
-
-  // Upsert comic: match by directory+source_id first, then by name+author to prevent duplicates
-  const existing = (
-    db.prepare('SELECT id FROM comic WHERE directory = ? AND source_id = ?').get(relBase, sourceId) ??
-    db.prepare('SELECT id FROM comic WHERE name = ? AND author = ?').get(parsed.name, parsed.author)
-  ) as { id: number } | undefined
-
-  let comicId: number
-  let result: 'imported' | 'updated'
-  if (existing) {
-    db.prepare('UPDATE comic SET name = ?, author = ?, image_path = ?, directory = ?, library_id = ?, source_id = ? WHERE id = ?').run(
-      parsed.name,
-      parsed.author,
-      relImagePath,
-      relBase,
-      libraryId,
-      sourceId,
-      existing.id
-    )
-    comicId = existing.id
-    result = 'updated'
-  } else {
-    const ins = db
-      .prepare('INSERT INTO comic (name, author, image_path, directory, library_id, source_id) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(parsed.name, parsed.author, relImagePath, relBase, libraryId, sourceId)
-    comicId = ins.lastInsertRowid as number
-    result = 'imported'
-  }
-
-  // Process volumes
-  for (const volEntry of comicFiles) {
-    if (!volEntry.isDirectory()) continue
-    const volNum = parseVolumeNumber(volEntry.name)
-    if (volNum === null) continue
-
-    const volDir = join(comicDir, volEntry.name)
-    const relVolDir = join(relBase, volEntry.name)
-
-    // Find volume cbz file
-    let relVolumeFile: string | null = null
-    const volFiles = readdirSync(volDir, { withFileTypes: true })
-    for (const f of volFiles) {
-      if (
-        f.isFile() &&
-        f.name.endsWith('.cbz') &&
-        /Vol\.\s*\d+/i.test(f.name) &&
-        !/Ch\./i.test(f.name) &&
-        !/Extra/i.test(f.name)
-      ) {
-        relVolumeFile = join(relVolDir, f.name)
-        break
-      }
-    }
-
-    // Upsert volume
-    const existingVol = db
-      .prepare('SELECT id FROM volume WHERE comic_id = ? AND number = ?')
-      .get(comicId, volNum) as { id: number } | undefined
-
-    let volumeId: number
-    if (existingVol) {
-      db.prepare('UPDATE volume SET directory = ?, file = ? WHERE id = ?').run(
-        relVolDir,
-        relVolumeFile,
-        existingVol.id
-      )
-      volumeId = existingVol.id
-    } else {
-      const ins = db
-        .prepare('INSERT INTO volume (comic_id, number, directory, file) VALUES (?, ?, ?, ?)')
-        .run(comicId, volNum, relVolDir, relVolumeFile)
-      volumeId = ins.lastInsertRowid as number
-    }
-
-    // Upsert chapters and extras, preserving ids so tag associations and favorites survive
-    const seenChapterIds: number[] = []
-    for (const f of volFiles) {
-      if (!f.isFile() || !f.name.endsWith('.cbz')) continue
-      // Skip the volume file itself
-      if (relVolumeFile && join(relVolDir, f.name) === relVolumeFile) continue
-
-      const chapterInfo = parseChapterNumber(f.name)
-      if (!chapterInfo) continue
-
-      const row = db
-        .prepare(
-          `INSERT INTO chapter (volume_id, number, increment, type, file) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(volume_id, number, increment, type) DO UPDATE SET file = excluded.file
-           RETURNING id`
-        )
-        .get(
-          volumeId,
-          chapterInfo.number,
-          chapterInfo.increment,
-          chapterInfo.type,
-          join(relVolDir, f.name)
-        ) as { id: number }
-      seenChapterIds.push(row.id)
-    }
-
-    // Remove chapter rows whose files no longer exist on disk
-    if (seenChapterIds.length === 0) {
-      db.prepare('DELETE FROM chapter WHERE volume_id = ?').run(volumeId)
-    } else {
-      const placeholders = seenChapterIds.map(() => '?').join(',')
-      db.prepare(
-        `DELETE FROM chapter WHERE volume_id = ? AND id NOT IN (${placeholders})`
-      ).run(volumeId, ...seenChapterIds)
-    }
-  }
-
-  return result
 }
 
-function importSource(rootDir: string, libraryId: number): { imported: number; updated: number } {
-  const db = getDb()
-  let imported = 0
-  let updated = 0
-
-  // Upsert source first to get its ID
-  db.prepare(
-    'INSERT INTO source (path, library_id) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET library_id = excluded.library_id'
-  ).run(rootDir, libraryId)
-
-  const sourceRow = db.prepare('SELECT id FROM source WHERE path = ?').get(rootDir) as { id: number }
-  const sourceId = sourceRow.id
-
-  const entries = readdirSync(rootDir, { withFileTypes: true })
-
-  const transaction = db.transaction(() => {
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-
-      const parsed = parseComicFolder(entry.name)
-      if (!parsed) continue
-
-      const result = scanComicDir(db, join(rootDir, entry.name), parsed, libraryId, rootDir, sourceId)
-      if (result === 'imported') imported++
-      else updated++
-    }
-  })
-
-  transaction()
-
-  return { imported, updated }
-}
-
-function refreshComic(comicId: number): boolean {
-  const db = getDb()
-
-  const comic = db.prepare(
-    'SELECT c.id, c.directory, c.library_id, c.source_id, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id WHERE c.id = ?'
-  ).get(comicId) as
-    | { id: number; directory: string; library_id: number; source_id: number | null; source_path: string | null }
-    | undefined
-  if (!comic || !comic.source_id || !comic.source_path) return false
-
-  const fullDir = join(comic.source_path, comic.directory)
-  const parsed = parseComicFolder(basename(fullDir))
-  if (!parsed) return false
-
-  const transaction = db.transaction(() => {
-    scanComicDir(db, fullDir, parsed, comic.library_id, comic.source_path!, comic.source_id!)
-  })
-
-  transaction()
-  return true
-}
-
-export function clearAllData(): void {
-  const db = getDb()
-  db.exec('DELETE FROM chapter_tag')
-  db.exec('DELETE FROM volume_tag')
-  db.exec('DELETE FROM comic_tag')
-  db.exec('DELETE FROM tag')
-  db.exec('DELETE FROM chapter')
-  db.exec('DELETE FROM volume')
-  db.exec('DELETE FROM comic')
-  db.exec('DELETE FROM source')
-  db.exec('DELETE FROM library')
-  db.exec('DELETE FROM settings')
-}
-
-export function getLibrarySources(libraryId: number): Array<{ id: number; path: string; type: string; library_id: number }> {
-  const db = getDb()
-  return db.prepare(
-    'SELECT id, path, type, library_id FROM source WHERE library_id = ? ORDER BY path ASC'
-  ).all(libraryId) as Array<{ id: number; path: string; type: string; library_id: number }>
-}
-
-export function checkLibrarySourcesExist(libraryId: number): Array<{ id: number; path: string; type: string; library_id: number; exists: boolean }> {
-  const sources = getLibrarySources(libraryId)
-  return sources.map((s) => ({ ...s, exists: existsSync(s.path) }))
-}
-
-export function checkAllSourcesExist(): Array<{ id: number; path: string; type: string; library_id: number | null; exists: boolean }> {
-  const db = getDb()
-  const sources = db.prepare(
-    'SELECT id, path, type, library_id FROM source ORDER BY path ASC'
-  ).all() as Array<{ id: number; path: string; type: string; library_id: number | null }>
-  return sources.map((s) => ({ ...s, exists: existsSync(s.path) }))
-}
-
-export function updateSourcePath(id: number, newPath: string): boolean {
-  const db = getDb()
-  const row = db.prepare('SELECT id FROM source WHERE id = ?').get(id) as
-    | { id: number }
-    | undefined
-  if (!row) return false
-
-  db.prepare('UPDATE source SET path = ? WHERE id = ?').run(newPath, id)
-  return true
-}
-
-export function refreshSource(id: number): { imported: number; updated: number } | null {
-  const db = getDb()
-  const row = db.prepare('SELECT path, library_id FROM source WHERE id = ?').get(id) as
-    | { path: string; library_id: number | null }
-    | undefined
-  if (!row || !row.library_id) return null
-  return importSource(row.path, row.library_id)
-}
-
-export function clearSource(id: number): boolean {
-  const db = getDb()
-  const row = db.prepare('SELECT id FROM source WHERE id = ?').get(id) as
-    | { id: number }
-    | undefined
-  if (!row) return false
-
-  const transaction = db.transaction(() => {
-    db.prepare('DELETE FROM comic WHERE source_id = ?').run(id)
-    db.prepare('DELETE FROM source WHERE id = ?').run(id)
-  })
-
-  transaction()
-  return true
-}
-
-export function addSource(path: string, libraryId: number): { id: number; imported: number; updated: number } {
-  const result = importSource(path, libraryId)
-  const db = getDb()
-  const row = db.prepare('SELECT id FROM source WHERE path = ?').get(path) as { id: number }
-  return { id: row.id, ...result }
-}
-
-export async function pickSourceDirectory(win: BrowserWindow): Promise<string | null> {
-  const result = await dialog.showOpenDialog(win, {
-    properties: ['openDirectory'],
-    title: 'Select Source Directory'
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
-}
-
-export function createLibrary(
-  opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean },
-  sourcePaths?: string[]
-): { id: number; sourceResults?: Array<{ path: string; imported: number; updated: number }> } {
-  const db = getDb()
-  const ins = db.prepare(
-    'INSERT INTO library (name, description, media_type, image_path, is_hidden) VALUES (?, ?, ?, ?, ?)'
-  ).run(
-    opts.name,
-    opts.description ?? null,
-    opts.mediaType ?? 'comics',
-    opts.imagePath ?? null,
-    opts.isHidden ? 1 : 0
-  )
-  const id = ins.lastInsertRowid as number
-
-  if (sourcePaths && sourcePaths.length > 0) {
-    const sourceResults = sourcePaths.map((path) => {
-      const result = importSource(path, id)
-      return { path, ...result }
-    })
-    return { id, sourceResults }
-  }
-
-  return { id }
-}
-
-export function getLibraries(search?: string, hiddenFilter: 'hide' | 'include' | 'only' = 'hide'): Array<Record<string, unknown>> {
-  const db = getDb()
-  const conditions: string[] = []
-  const params: unknown[] = []
-
-  if (search) {
-    conditions.push('l.name LIKE ?')
-    params.push(`%${search}%`)
-  }
-
-  // Hidden libraries are only ever reachable while hidden content is revealed.
-  const effectiveFilter = getHiddenContentVisible() ? hiddenFilter : 'hide'
-
-  if (effectiveFilter === 'hide') {
-    conditions.push('l.is_hidden = 0')
-  } else if (effectiveFilter === 'only') {
-    conditions.push('l.is_hidden = 1')
-  }
-
-  const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
-
-  return db.prepare(
-    `SELECT l.*, COUNT(c.id) as comic_count FROM library l LEFT JOIN comic c ON c.library_id = l.id ${whereClause} GROUP BY l.id ORDER BY l.name ASC`
-  ).all(...params) as Array<Record<string, unknown>>
-}
-
-export function getLibrary(id: number): Record<string, unknown> | null {
-  const db = getDb()
-  return (db.prepare('SELECT l.*, COUNT(c.id) as comic_count FROM library l LEFT JOIN comic c ON c.library_id = l.id WHERE l.id = ? GROUP BY l.id').get(id) as Record<string, unknown>) ?? null
-}
-
-export function updateLibrary(id: number, opts: { name?: string; description?: string; imagePath?: string | null; isHidden?: boolean }): boolean {
-  const db = getDb()
-  const sets: string[] = []
-  const params: unknown[] = []
-
-  if (opts.name !== undefined) {
-    sets.push('name = ?')
-    params.push(opts.name)
-  }
-  if (opts.description !== undefined) {
-    sets.push('description = ?')
-    params.push(opts.description || null)
-  }
-  if (opts.imagePath !== undefined) {
-    sets.push('image_path = ?')
-    params.push(opts.imagePath)
-  }
-  if (opts.isHidden !== undefined) {
-    sets.push('is_hidden = ?')
-    params.push(opts.isHidden ? 1 : 0)
-  }
-
-  if (sets.length === 0) return false
-
-  params.push(id)
-  const result = db.prepare(`UPDATE library SET ${sets.join(', ')} WHERE id = ?`).run(...params)
-  return result.changes > 0
-}
-
-export function deleteLibrary(id: number): boolean {
-  const db = getDb()
-  const del = db.transaction(() => {
-    db.prepare('DELETE FROM source WHERE library_id = ?').run(id)
-    return db.prepare('DELETE FROM library WHERE id = ?').run(id)
-  })
-  const result = del()
-  return result.changes > 0
-}
-
-export async function pickLibraryImage(win: BrowserWindow): Promise<string | null> {
-  const result = await dialog.showOpenDialog(win, {
-    properties: ['openFile'],
-    title: 'Select Library Image',
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }]
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
-}
-
-export function getHiddenContentEnabled(): boolean {
-  const db = getDb()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'hidden_content_enabled'").get() as
-    | { value: string }
-    | undefined
-  return row?.value === '1'
-}
-
-export function setHiddenContentEnabled(enabled: boolean): void {
-  const db = getDb()
-  db.prepare(
-    "INSERT INTO settings (key, value) VALUES ('hidden_content_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).run(enabled ? '1' : '0')
-  // Turning the feature off always collapses hidden content back out of view.
-  if (!enabled) hiddenContentVisible = false
-}
-
-// Session-only: whether hidden content is currently revealed. Never persisted —
-// it resets to false every time the app starts.
-let hiddenContentVisible = false
-
-export function getHiddenContentVisible(): boolean {
-  return getHiddenContentEnabled() && hiddenContentVisible
-}
-
-export function setHiddenContentVisible(visible: boolean): void {
-  hiddenContentVisible = visible && getHiddenContentEnabled()
-}
-
-// --- Hidden content PIN -----------------------------------------------------
-// The PIN is stored only as a salted scrypt hash and is verified here in the
-// main process; the renderer never receives the hash and cannot bypass a check.
-
-export const PIN_LENGTH = 5
-
-const PIN_PATTERN = new RegExp(`^\\d{${PIN_LENGTH}}$`)
-
-function isValidPinFormat(pin: unknown): pin is string {
-  return typeof pin === 'string' && PIN_PATTERN.test(pin)
-}
-
-function readPinRecord(): { salt: Buffer; hash: Buffer } | null {
-  const db = getDb()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'hidden_content_pin'").get() as
-    | { value: string }
-    | undefined
-  if (!row?.value) return null
-  const [scheme, saltHex, hashHex] = row.value.split('$')
-  if (scheme !== 'scrypt' || !saltHex || !hashHex) return null
-  return { salt: Buffer.from(saltHex, 'hex'), hash: Buffer.from(hashHex, 'hex') }
-}
-
-function writePinRecord(pin: string): void {
-  const salt = randomBytes(16)
-  const hash = scryptSync(pin, salt, 32)
-  getDb()
-    .prepare(
-      "INSERT INTO settings (key, value) VALUES ('hidden_content_pin', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    )
-    .run(`scrypt$${salt.toString('hex')}$${hash.toString('hex')}`)
-}
-
-export function hasHiddenContentPin(): boolean {
-  return readPinRecord() !== null
-}
-
-// Escalating delay after consecutive wrong PINs, so a 5-digit space isn't
-// trivially brute-forceable. Resets on success and on app restart.
-let failedPinAttempts = 0
-let pinLockedUntil = 0
-
-function pinLockRemainingMs(): number {
-  return Math.max(0, pinLockedUntil - Date.now())
-}
-
-export function verifyHiddenContentPin(pin: unknown): boolean {
-  const record = readPinRecord()
-  if (!record) return true // no PIN configured — nothing to check
-  if (pinLockRemainingMs() > 0) return false
-  if (!isValidPinFormat(pin)) return false
-
-  const candidate = scryptSync(pin, record.salt, record.hash.length)
-  const ok = candidate.length === record.hash.length && timingSafeEqual(candidate, record.hash)
-
-  if (ok) {
-    failedPinAttempts = 0
-    pinLockedUntil = 0
-  } else {
-    failedPinAttempts += 1
-    if (failedPinAttempts >= 3) {
-      pinLockedUntil = Date.now() + Math.min(30_000, 2 ** (failedPinAttempts - 3) * 1000)
-    }
-  }
-  return ok
-}
-
-/** Error text for a rejected PIN, accounting for an active lockout. */
-function pinFailureMessage(): string {
-  const wait = pinLockRemainingMs()
-  return wait > 0
-    ? `Too many attempts. Try again in ${Math.ceil(wait / 1000)}s.`
-    : 'Current PIN is incorrect.'
-}
-
-export function setHiddenContentPin(
-  currentPin: unknown,
-  newPin: unknown
-): { ok: true } | { ok: false; error: string } {
-  if (hasHiddenContentPin() && !verifyHiddenContentPin(currentPin)) {
-    return { ok: false, error: pinFailureMessage() }
-  }
-  if (!isValidPinFormat(newPin)) {
-    return { ok: false, error: `PIN must be exactly ${PIN_LENGTH} digits.` }
-  }
-  writePinRecord(newPin)
-  return { ok: true }
-}
-
-export function clearHiddenContentPin(currentPin: unknown): { ok: true } | { ok: false; error: string } {
-  if (!hasHiddenContentPin()) return { ok: true }
-  if (!verifyHiddenContentPin(currentPin)) {
-    return { ok: false, error: pinFailureMessage() }
-  }
-  getDb().prepare("DELETE FROM settings WHERE key = 'hidden_content_pin'").run()
-  return { ok: true }
-}
-
-/**
- * Reveal hidden content, prompting for the PIN first when one is configured.
- * Used by both the menu item and the renderer's toggle button.
- */
-export function requestShowHiddenContent(): void {
-  if (hasHiddenContentPin()) {
-    for (const w of BrowserWindow.getAllWindows()) {
-      w.webContents.send('hidden-content-pin-required')
-    }
-    // Revert the menu checkbox — nothing is revealed until the PIN is accepted.
-    if (onMenuRebuild) onMenuRebuild()
-    return
-  }
-  setHiddenContentVisible(true)
-  broadcastHiddenContentState()
-}
-
-/** Push the current enabled/visible pair to every window and rebuild the menu. */
-export function broadcastHiddenContentState(): void {
-  const enabled = getHiddenContentEnabled()
-  const visible = getHiddenContentVisible()
-  for (const w of BrowserWindow.getAllWindows()) {
-    w.webContents.send('hidden-content-toggled', enabled)
-    w.webContents.send('hidden-content-visibility-changed', visible)
-  }
-  if (onMenuRebuild) onMenuRebuild()
-}
-
-export function getMissingSourcePaths(libraryId: number): string[] {
-  const sources = getLibrarySources(libraryId)
-  return sources.filter((s) => !existsSync(s.path)).map((s) => s.path)
-}
-
-export function registerIpcHandlers(): void {
+function registerComicHandlers(): void {
   ipcMain.handle(
     'get-comics',
     (
@@ -604,206 +66,80 @@ export function registerIpcHandlers(): void {
       pageSize: number = 20,
       favoritesOnly: boolean = false,
       includedTagIds: number[] = [],
-      excludedTagIds: number[] = []
-    ) => {
-      const db = getDb()
-      const offset = (page - 1) * pageSize
-
-      const conditions: string[] = ['c.library_id = ?']
-      const params: unknown[] = [libraryId]
-
-      if (search) {
-        conditions.push('(c.name LIKE ? OR c.author LIKE ?)')
-        const term = `%${search}%`
-        params.push(term, term)
-      }
-
-      if (favoritesOnly) {
-        conditions.push('c.favorite = 1')
-      }
-
-      for (const tagId of includedTagIds) {
-        conditions.push(TAG_VISIBLE_SQL)
-        params.push(tagId, tagId, tagId)
-      }
-
-      for (const tagId of excludedTagIds) {
-        conditions.push(`NOT ${TAG_VISIBLE_SQL}`)
-        params.push(tagId, tagId, tagId)
-      }
-
-      const whereClause = 'WHERE ' + conditions.join(' AND ')
-
-      const countRow = db
-        .prepare(`SELECT COUNT(*) as total FROM comic c ${whereClause}`)
-        .get(...params) as { total: number }
-
-      params.push(pageSize, offset)
-      const comics = db
-        .prepare(
-          `SELECT c.*, s.path as source_path FROM comic c LEFT JOIN source s ON s.id = c.source_id ${whereClause} ORDER BY c.name ASC LIMIT ? OFFSET ?`
-        )
-        .all(...params) as Array<Record<string, unknown>>
-
-      // Resolve relative paths to absolute
-      const resolved = comics.map((comic) => {
-        const sourcePath = comic.source_path as string | null
-        delete comic.source_path
-        if (sourcePath) {
-          comic.directory = resolveSourcePath(sourcePath, comic.directory as string)
-          comic.image_path = resolveSourcePath(sourcePath, comic.image_path as string | null)
-        }
-        return comic
+      excludedTagIds: number[] = [],
+      sortBy: string = 'name',
+      sortDir: string = 'asc'
+    ) =>
+      getComics({
+        libraryId,
+        page,
+        search,
+        pageSize,
+        favoritesOnly,
+        includedTagIds,
+        excludedTagIds,
+        sortBy,
+        sortDir
       })
-
-      return { comics: resolved, total: countRow.total, page, pageSize }
-    }
   )
 
-  ipcMain.handle('get-random-comic', (_event, libraryId: number) => {
-    const db = getDb()
-    return db.prepare('SELECT id FROM comic WHERE library_id = ? ORDER BY RANDOM() LIMIT 1').get(libraryId) as { id: number } | undefined ?? null
-  })
+  ipcMain.handle('get-random-comic', (_event, libraryId: number) => getRandomComicId(libraryId))
 
-  ipcMain.handle('get-comic', (_event, id: number) => {
-    const db = getDb()
-    const comic = db.prepare(
-      'SELECT c.*, s.path as source_path, l.is_hidden as library_is_hidden FROM comic c LEFT JOIN source s ON s.id = c.source_id LEFT JOIN library l ON l.id = c.library_id WHERE c.id = ?'
-    ).get(id) as Record<string, unknown> | undefined
-    if (!comic) return null
+  ipcMain.handle('get-comic', (_event, id: number) => getComic(id))
 
-    const sourcePath = comic.source_path as string | null
-    delete comic.source_path
-    if (sourcePath) {
-      comic.directory = resolveSourcePath(sourcePath, comic.directory as string)
-      comic.image_path = resolveSourcePath(sourcePath, comic.image_path as string | null)
-    }
+  ipcMain.handle('get-volume', (_event, id: number) => getVolume(id))
 
-    const volumes = db
-      .prepare('SELECT * FROM volume WHERE comic_id = ? ORDER BY number ASC')
-      .all(id) as Array<Record<string, unknown>>
-
-    const volumesWithChapters = volumes.map((vol) => {
-      if (sourcePath) {
-        vol.directory = resolveSourcePath(sourcePath, vol.directory as string)!
-        vol.file = resolveSourcePath(sourcePath, vol.file as string | null)
-      }
-
-      const chapters = db
-        .prepare('SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC, increment ASC')
-        .all(vol.id) as Array<Record<string, unknown>>
-
-      const resolvedChapters = chapters.map((ch) => {
-        if (sourcePath) {
-          ch.file = resolveSourcePath(sourcePath, ch.file as string)!
-        }
-        return ch
-      })
-
-      return { ...vol, chapters: resolvedChapters }
-    })
-
-    return { ...comic, volumes: volumesWithChapters }
-  })
-
-  ipcMain.handle('get-volume', (_event, id: number) => {
-    const db = getDb()
-    const volume = db.prepare(
-      'SELECT v.*, s.path as source_path, l.is_hidden as library_is_hidden FROM volume v JOIN comic c ON c.id = v.comic_id LEFT JOIN source s ON s.id = c.source_id LEFT JOIN library l ON l.id = c.library_id WHERE v.id = ?'
-    ).get(id) as Record<string, unknown> | undefined
-    if (!volume) return null
-
-    const sourcePath = volume.source_path as string | null
-    delete volume.source_path
-    if (sourcePath) {
-      volume.directory = resolveSourcePath(sourcePath, volume.directory as string)!
-      volume.file = resolveSourcePath(sourcePath, volume.file as string | null)
-    }
-
-    const chapters = db
-      .prepare(
-        "SELECT * FROM chapter WHERE volume_id = ? ORDER BY type ASC, number ASC, increment ASC"
-      )
-      .all(id) as Array<Record<string, unknown>>
-
-    const resolvedChapters = chapters.map((ch) => {
-      if (sourcePath) {
-        ch.file = resolveSourcePath(sourcePath, ch.file as string)!
-      }
-      return ch
-    })
-
-    return { ...volume, chapters: resolvedChapters }
-  })
-
-  ipcMain.handle('refresh-comic', (_event, id: number) => {
-    return refreshComic(id)
-  })
+  ipcMain.handle('refresh-comic', (_event, id: number) => refreshComic(id))
 
   ipcMain.handle('delete-comic', (event, id: number) => {
-    const db = getDb()
-    const result = db.prepare('DELETE FROM comic WHERE id = ?').run(id)
-    if (result.changes > 0) {
-      event.sender.send('comics-updated')
-    }
-    return result.changes > 0
+    const deleted = deleteComic(id)
+    if (deleted) event.sender.send('comics-updated')
+    return deleted
   })
 
-  ipcMain.handle('toggle-favorite', (_event, id: number) => {
-    const db = getDb()
-    const comic = db.prepare('SELECT favorite FROM comic WHERE id = ?').get(id) as
-      | { favorite: number }
-      | undefined
-    if (!comic) return null
-    const newValue = comic.favorite ? 0 : 1
-    db.prepare('UPDATE comic SET favorite = ? WHERE id = ?').run(newValue, id)
-    return newValue === 1
-  })
-
-  ipcMain.handle('toggle-volume-favorite', (_event, id: number) => {
-    const db = getDb()
-    const volume = db.prepare('SELECT favorite FROM volume WHERE id = ?').get(id) as
-      | { favorite: number }
-      | undefined
-    if (!volume) return null
-    const newValue = volume.favorite ? 0 : 1
-    db.prepare('UPDATE volume SET favorite = ? WHERE id = ?').run(newValue, id)
-    return newValue === 1
-  })
-
-  ipcMain.handle('toggle-chapter-favorite', (_event, id: number) => {
-    const db = getDb()
-    const chapter = db.prepare('SELECT favorite FROM chapter WHERE id = ?').get(id) as
-      | { favorite: number }
-      | undefined
-    if (!chapter) return null
-    const newValue = chapter.favorite ? 0 : 1
-    db.prepare('UPDATE chapter SET favorite = ? WHERE id = ?').run(newValue, id)
-    return newValue === 1
-  })
+  ipcMain.handle('toggle-favorite', (_event, id: number) => toggleFavorite('comic', id))
+  ipcMain.handle('toggle-volume-favorite', (_event, id: number) => toggleFavorite('volume', id))
+  ipcMain.handle('toggle-chapter-favorite', (_event, id: number) => toggleFavorite('chapter', id))
 
   ipcMain.handle('open-file', async (_event, filePath: string) => {
+    if (!filePath) return { error: 'No file path recorded — try refreshing the comic.' }
+
+    // Catch a stale or mismatched path before handing it to the OS, which fails
+    // silently. A missing file usually means the folder was renamed or moved
+    // since the last scan.
+    if (!existsSync(filePath)) {
+      console.error('open-file: path does not exist:', filePath)
+      return { error: `File not found on disk: ${basename(filePath)}` }
+    }
+
     try {
-      // Use openExternal with file:// URI — more reliable across Linux DEs
-      await shell.openExternal(`file://${filePath}`)
+      // openPath takes a raw filesystem path, so nothing needs escaping. Building
+      // a file:// URI by interpolation instead silently corrupts any name
+      // containing '#', '?' or '%' — the URI parser reads them as a fragment,
+      // query, or percent-escape and the path never reaches the handler.
+      const openPathError = await shell.openPath(filePath)
+      if (!openPathError) return { success: true }
+
+      // Fall back to a file:// URI — more reliable on some Linux desktops. Built
+      // via pathToFileURL so every reserved character is encoded properly.
+      await shell.openExternal(pathToFileURL(filePath).href)
       return { success: true }
     } catch (err) {
+      console.error('open-file failed for', filePath, err)
       return { error: String(err) }
     }
   })
+}
 
-  ipcMain.handle('get-hidden-content-enabled', () => {
-    return getHiddenContentEnabled()
-  })
+function registerHiddenContentHandlers(): void {
+  ipcMain.handle('get-hidden-content-enabled', () => getHiddenContentEnabled())
 
   ipcMain.handle('set-hidden-content-enabled', (_event, enabled: boolean) => {
     setHiddenContentEnabled(enabled)
     broadcastHiddenContentState()
   })
 
-  ipcMain.handle('get-hidden-content-visible', () => {
-    return getHiddenContentVisible()
-  })
+  ipcMain.handle('get-hidden-content-visible', () => getHiddenContentVisible())
 
   ipcMain.handle('set-hidden-content-visible', (_event, visible: boolean, pin?: string) => {
     // Concealing never requires a PIN; revealing does when one is configured.
@@ -815,9 +151,7 @@ export function registerIpcHandlers(): void {
     return { ok: true }
   })
 
-  ipcMain.handle('has-hidden-content-pin', () => {
-    return hasHiddenContentPin()
-  })
+  ipcMain.handle('has-hidden-content-pin', () => hasHiddenContentPin())
 
   // Used to gate the first step of the change-PIN flow. Shares the same
   // lockout counter as every other check, so it is not a free oracle.
@@ -827,25 +161,25 @@ export function registerIpcHandlers(): void {
     return { ok: true }
   })
 
-  ipcMain.handle('set-hidden-content-pin', (_event, currentPin: string | null, newPin: string) => {
-    return setHiddenContentPin(currentPin, newPin)
-  })
+  ipcMain.handle('set-hidden-content-pin', (_event, currentPin: string | null, newPin: string) =>
+    setHiddenContentPin(currentPin, newPin)
+  )
 
   ipcMain.handle('clear-hidden-content-pin', (_event, currentPin: string) => {
     const result = clearHiddenContentPin(currentPin)
     if (result.ok) broadcastHiddenContentState()
     return result
   })
+}
 
-  ipcMain.handle('get-missing-source-paths', (_event, libraryId: number) => {
-    return getMissingSourcePaths(libraryId)
-  })
+function registerSourceHandlers(): void {
+  ipcMain.handle('get-missing-source-paths', (_event, libraryId: number) =>
+    getMissingSourcePaths(libraryId)
+  )
 
-  // Source handlers
   ipcMain.handle('pick-source-directory', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return null
-    return pickSourceDirectory(win)
+    return win ? pickSourceDirectory(win) : null
   })
 
   ipcMain.handle('add-source', (event, path: string, libraryId: number) => {
@@ -854,79 +188,84 @@ export function registerIpcHandlers(): void {
     return result
   })
 
-  ipcMain.handle('get-library-sources', (_event, libraryId: number) => {
-    return getLibrarySources(libraryId)
-  })
+  ipcMain.handle('get-library-sources', (_event, libraryId: number) => getLibrarySources(libraryId))
 
-  ipcMain.handle('check-library-sources-exist', (_event, libraryId: number) => {
-    return checkLibrarySourcesExist(libraryId)
-  })
+  ipcMain.handle('check-library-sources-exist', (_event, libraryId: number) =>
+    checkLibrarySourcesExist(libraryId)
+  )
 
-  ipcMain.handle('check-all-sources-exist', () => {
-    return checkAllSourcesExist()
-  })
+  ipcMain.handle('check-all-sources-exist', () => checkAllSourcesExist())
 
   ipcMain.handle('update-source-path', async (event, id: number) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return false
+    if (!win) return { ok: false, error: 'No window available.' }
 
-    const result = await dialog.showOpenDialog(win, {
+    const picked = await dialog.showOpenDialog(win, {
       properties: ['openDirectory'],
       title: 'Select New Directory Location'
     })
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true }
 
-    if (result.canceled || result.filePaths.length === 0) return false
-
-    const success = updateSourcePath(id, result.filePaths[0])
-    if (success) {
-      event.sender.send('comics-updated')
-    }
-    return success
+    const result = updateSourcePath(id, picked.filePaths[0])
+    if (result.ok) event.sender.send('comics-updated')
+    return result
   })
 
   ipcMain.handle('refresh-source', (event, id: number) => {
     const result = refreshSource(id)
-    if (result) {
-      event.sender.send('comics-updated')
-    }
+    if (result) event.sender.send('comics-updated')
     return result
   })
 
   ipcMain.handle('clear-source', (event, id: number) => {
-    const result = clearSource(id)
-    if (result) {
-      event.sender.send('comics-updated')
-    }
-    return result
+    const cleared = clearSource(id)
+    if (cleared) event.sender.send('comics-updated')
+    return cleared
   })
+}
 
-  // Library handlers
-  ipcMain.handle('create-library', (_event, opts: { name: string; description?: string; mediaType?: string; imagePath?: string; isHidden?: boolean }, sourcePaths?: string[]) => {
-    return createLibrary(opts, sourcePaths)
-  })
+function registerLibraryHandlers(): void {
+  ipcMain.handle(
+    'create-library',
+    (
+      _event,
+      opts: {
+        name: string
+        description?: string
+        mediaType?: string
+        imagePath?: string
+        isHidden?: boolean
+      },
+      sourcePaths?: string[]
+    ) => createLibrary(opts, sourcePaths)
+  )
 
   ipcMain.handle('pick-library-image', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return null
-    return pickLibraryImage(win)
+    return win ? pickLibraryImage(win) : null
   })
 
-  ipcMain.handle('get-libraries', (_event, search?: string, hiddenFilter?: 'hide' | 'include' | 'only') => {
-    return getLibraries(search, hiddenFilter)
-  })
+  ipcMain.handle(
+    'get-libraries',
+    (_event, search?: string, hiddenFilter?: 'hide' | 'include' | 'only') =>
+      getLibraries(search, hiddenFilter)
+  )
 
-  ipcMain.handle('get-library', (_event, id: number) => {
-    return getLibrary(id)
-  })
+  ipcMain.handle('get-library', (_event, id: number) => getLibrary(id))
 
-  ipcMain.handle('update-library', (_event, id: number, opts: { name?: string; description?: string; imagePath?: string | null; isHidden?: boolean }) => {
-    return updateLibrary(id, opts)
-  })
+  ipcMain.handle(
+    'update-library',
+    (
+      _event,
+      id: number,
+      opts: { name?: string; description?: string; imagePath?: string | null; isHidden?: boolean }
+    ) => updateLibrary(id, opts)
+  )
 
-  ipcMain.handle('delete-library', (_event, id: number) => {
-    return deleteLibrary(id)
-  })
+  ipcMain.handle('delete-library', (_event, id: number) => deleteLibrary(id))
+}
 
+function registerDataHandlers(): void {
   ipcMain.handle('clear-all-data', (event) => {
     clearAllData()
     event.sender.send('comics-updated')
@@ -947,218 +286,19 @@ export function registerIpcHandlers(): void {
     if (!win) return { canceled: true }
     const result = await importBackup(win)
     if (!result.canceled && !result.error) {
-      for (const w of BrowserWindow.getAllWindows()) {
-        w.webContents.send('comics-updated')
-        w.webContents.send('tags-updated')
-      }
+      // An import replaces the whole database, so every view is stale.
+      broadcast('comics-updated', 'tags-updated')
       broadcastHiddenContentState()
     }
     return result
   })
+}
 
-  // Tag handlers
-  ipcMain.handle(
-    'list-tags',
-    (
-      _event,
-      resource: string,
-      search: string,
-      limit: number = 20,
-      includeHidden: boolean = false
-    ) => {
-      const db = getDb()
-      const hiddenClause = includeHidden && getHiddenContentVisible() ? '' : ' AND is_hidden = 0'
-      return db
-        .prepare(
-          `SELECT id, name, is_hidden FROM tag WHERE resource = ? AND name LIKE ?${hiddenClause} ORDER BY name COLLATE NOCASE ASC LIMIT ?`
-        )
-        .all(resource, `%${search}%`, limit) as Array<{ id: number; name: string; is_hidden: number }>
-    }
-  )
-
-  ipcMain.handle(
-    'create-tag',
-    (event, name: string, resource: string, isHidden: boolean = false) => {
-      const trimmed = name.trim()
-      if (!trimmed) throw new Error('Tag name cannot be empty')
-      const db = getDb()
-      const row = db
-        .prepare(
-          'INSERT INTO tag (name, resource, is_hidden) VALUES (?, ?, ?) ON CONFLICT(name, resource) DO UPDATE SET name = excluded.name RETURNING id, name, resource, is_hidden'
-        )
-        .get(trimmed, resource, isHidden ? 1 : 0) as {
-        id: number
-        name: string
-        resource: string
-        is_hidden: number
-      }
-      event.sender.send('tags-updated')
-      return row
-    }
-  )
-
-  ipcMain.handle('get-comic-tags', (_event, comicId: number) => {
-    const db = getDb()
-    const hiddenClause = getHiddenContentVisible() ? '' : ' WHERE t.is_hidden = 0'
-    return db
-      .prepare(
-        `WITH attachments AS (
-          SELECT tag_id, 'comic' AS lvl FROM comic_tag WHERE comic_id = ?
-          UNION ALL
-          SELECT tag_id, 'volume' AS lvl FROM volume_tag WHERE volume_id IN (SELECT id FROM volume WHERE comic_id = ?)
-          UNION ALL
-          SELECT tag_id, 'chapter' AS lvl FROM chapter_tag WHERE chapter_id IN (
-            SELECT ch.id FROM chapter ch JOIN volume v ON v.id = ch.volume_id WHERE v.comic_id = ?
-          )
-        )
-        SELECT t.id, t.name, t.is_hidden,
-          MAX(CASE WHEN a.lvl = 'comic' THEN 1 ELSE 0 END) AS direct,
-          COUNT(*) AS count
-        FROM tag t JOIN attachments a ON a.tag_id = t.id${hiddenClause}
-        GROUP BY t.id, t.name, t.is_hidden
-        ORDER BY t.name COLLATE NOCASE ASC`
-      )
-      .all(comicId, comicId, comicId) as Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>
-  })
-
-  ipcMain.handle('get-volume-tags', (_event, volumeId: number) => {
-    const db = getDb()
-    const hiddenClause = getHiddenContentVisible() ? '' : ' WHERE t.is_hidden = 0'
-    return db
-      .prepare(
-        `WITH attachments AS (
-          SELECT tag_id, 'volume' AS lvl FROM volume_tag WHERE volume_id = ?
-          UNION ALL
-          SELECT tag_id, 'chapter' AS lvl FROM chapter_tag WHERE chapter_id IN (SELECT id FROM chapter WHERE volume_id = ?)
-        )
-        SELECT t.id, t.name, t.is_hidden,
-          MAX(CASE WHEN a.lvl = 'volume' THEN 1 ELSE 0 END) AS direct,
-          COUNT(*) AS count
-        FROM tag t JOIN attachments a ON a.tag_id = t.id${hiddenClause}
-        GROUP BY t.id, t.name, t.is_hidden
-        ORDER BY t.name COLLATE NOCASE ASC`
-      )
-      .all(volumeId, volumeId) as Array<{ id: number; name: string; is_hidden: number; direct: 0 | 1; count: number }>
-  })
-
-  ipcMain.handle('get-chapter-tags', (_event, chapterId: number) => {
-    const db = getDb()
-    const hiddenClause = getHiddenContentVisible() ? '' : ' AND t.is_hidden = 0'
-    return db
-      .prepare(
-        `SELECT t.id, t.name, t.is_hidden, 1 AS direct, 1 AS count FROM chapter_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.chapter_id = ?${hiddenClause} ORDER BY t.name COLLATE NOCASE ASC`
-      )
-      .all(chapterId) as Array<{ id: number; name: string; is_hidden: number; direct: 1; count: number }>
-  })
-
-  ipcMain.handle(
-    'attach-tag',
-    (event, level: 'comic' | 'volume' | 'chapter', entityId: number, tagId: number) => {
-      const db = getDb()
-      if (level === 'comic') {
-        db.prepare('INSERT OR IGNORE INTO comic_tag (comic_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
-      } else if (level === 'volume') {
-        db.prepare('INSERT OR IGNORE INTO volume_tag (volume_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
-      } else {
-        db.prepare('INSERT OR IGNORE INTO chapter_tag (chapter_id, tag_id) VALUES (?, ?)').run(entityId, tagId)
-      }
-      event.sender.send('tags-updated')
-    }
-  )
-
-  ipcMain.handle(
-    'detach-tag',
-    (event, level: 'comic' | 'volume' | 'chapter', entityId: number, tagId: number) => {
-      const db = getDb()
-      if (level === 'comic') {
-        db.prepare('DELETE FROM comic_tag WHERE comic_id = ? AND tag_id = ?').run(entityId, tagId)
-      } else if (level === 'volume') {
-        db.prepare('DELETE FROM volume_tag WHERE volume_id = ? AND tag_id = ?').run(entityId, tagId)
-      } else {
-        db.prepare('DELETE FROM chapter_tag WHERE chapter_id = ? AND tag_id = ?').run(entityId, tagId)
-      }
-      event.sender.send('tags-updated')
-    }
-  )
-
-  ipcMain.handle(
-    'get-all-tags',
-    (_event, search: string = '') => {
-      const db = getDb()
-      const visible = getHiddenContentVisible()
-      const hiddenClause = visible ? '' : ' AND t.is_hidden = 0'
-      // Comics in hidden libraries are unreachable while hidden content is concealed,
-      // so they must not be counted either.
-      const comicScope = visible
-        ? 'comic c'
-        : 'comic c JOIN library l ON l.id = c.library_id AND l.is_hidden = 0'
-      return db
-        .prepare(
-          `SELECT t.id, t.name, t.resource, t.is_hidden,
-             (SELECT COUNT(*) FROM ${comicScope} WHERE
-               EXISTS (SELECT 1 FROM comic_tag ct WHERE ct.comic_id = c.id AND ct.tag_id = t.id)
-               OR EXISTS (SELECT 1 FROM volume v JOIN volume_tag vt ON vt.volume_id = v.id WHERE v.comic_id = c.id AND vt.tag_id = t.id)
-               OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id JOIN chapter_tag cht ON cht.chapter_id = ch.id WHERE v.comic_id = c.id AND cht.tag_id = t.id)
-             ) AS comic_count
-           FROM tag t WHERE t.name LIKE ?${hiddenClause}
-           ORDER BY t.resource ASC, t.name COLLATE NOCASE ASC`
-        )
-        .all(`%${search}%`) as Array<{
-        id: number
-        name: string
-        resource: string
-        is_hidden: number
-        comic_count: number
-      }>
-    }
-  )
-
-  ipcMain.handle(
-    'update-tag',
-    (event, id: number, opts: { name?: string; isHidden?: boolean }) => {
-      const db = getDb()
-      const sets: string[] = []
-      const params: unknown[] = []
-      if (opts.name !== undefined) {
-        const trimmed = opts.name.trim()
-        if (!trimmed) throw new Error('Tag name cannot be empty')
-        sets.push('name = ?')
-        params.push(trimmed)
-      }
-      if (opts.isHidden !== undefined) {
-        sets.push('is_hidden = ?')
-        params.push(opts.isHidden ? 1 : 0)
-      }
-      if (sets.length === 0) return false
-      params.push(id)
-      const result = db.prepare(`UPDATE tag SET ${sets.join(', ')} WHERE id = ?`).run(...params)
-      if (result.changes > 0) event.sender.send('tags-updated')
-      return result.changes > 0
-    }
-  )
-
-  ipcMain.handle('delete-tag', (event, id: number) => {
-    const db = getDb()
-    const result = db.prepare('DELETE FROM tag WHERE id = ?').run(id)
-    if (result.changes > 0) event.sender.send('tags-updated')
-    return result.changes > 0
-  })
-
-  ipcMain.handle('get-library-tags', (_event, libraryId: number) => {
-    const db = getDb()
-    const hiddenClause = getHiddenContentVisible() ? '' : ' AND t.is_hidden = 0'
-    return db
-      .prepare(
-        `SELECT DISTINCT t.id, t.name, t.is_hidden FROM tag t
-        WHERE t.id IN (
-          SELECT ct.tag_id FROM comic_tag ct JOIN comic c ON c.id = ct.comic_id WHERE c.library_id = ?
-          UNION
-          SELECT vt.tag_id FROM volume_tag vt JOIN volume v ON v.id = vt.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
-          UNION
-          SELECT cht.tag_id FROM chapter_tag cht JOIN chapter ch ON ch.id = cht.chapter_id JOIN volume v ON v.id = ch.volume_id JOIN comic c ON c.id = v.comic_id WHERE c.library_id = ?
-        )${hiddenClause}
-        ORDER BY t.name COLLATE NOCASE ASC`
-      )
-      .all(libraryId, libraryId, libraryId) as Array<{ id: number; name: string; is_hidden: number }>
-  })
+export function registerIpcHandlers(): void {
+  registerComicHandlers()
+  registerHiddenContentHandlers()
+  registerSourceHandlers()
+  registerLibraryHandlers()
+  registerDataHandlers()
+  registerTagHandlers()
 }

@@ -2,15 +2,15 @@ import { app, BrowserWindow, Menu, protocol, net } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { initDb } from './db'
+import { registerIpcHandlers } from './ipc'
 import {
-  registerIpcHandlers,
+  broadcastHiddenContentState,
   getHiddenContentEnabled,
   getHiddenContentVisible,
-  setHiddenContentVisible,
   requestShowHiddenContent,
-  broadcastHiddenContentState,
+  setHiddenContentVisible,
   setMenuRebuildCallback
-} from './ipc'
+} from './hiddenContent'
 import { pathToFileURL } from 'url'
 
 function buildMenu(): void {

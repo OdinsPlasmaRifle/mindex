@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { openFile } from '../lib/openFile'
 import { showStatus } from '../components/StatusToast'
 import type { ComicWithVolumes } from '../types'
+import PageMessage from '../components/PageMessage'
 
 export default function EditComicPage(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -39,19 +41,11 @@ export default function EditComicPage(): React.JSX.Element {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    )
+    return <PageMessage>Loading...</PageMessage>
   }
 
   if (!comic) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Comic not found.
-      </div>
-    )
+    return <PageMessage>Comic not found.</PageMessage>
   }
 
   return (
@@ -77,7 +71,7 @@ export default function EditComicPage(): React.JSX.Element {
                     <p className="text-sm font-mono truncate flex-1" title={comic.directory}>{comic.directory}</p>
                     <button
                       type="button"
-                      onClick={() => api.openFile(comic.directory)}
+                      onClick={() => void openFile(comic.directory)}
                       className="shrink-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
                       title="Open in file explorer"
                     >

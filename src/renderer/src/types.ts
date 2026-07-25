@@ -102,3 +102,13 @@ export interface TagWithSource {
 }
 
 export type TagFilterState = 'included' | 'excluded'
+
+export type ComicSortBy = 'added' | 'name' | 'author'
+export type SortDir = 'asc' | 'desc'
+
+export interface ComicSort {
+  by: ComicSortBy
+  dir: SortDir
+}
+
+export const DEFAULT_COMIC_SORT: ComicSort = { by: 'name', dir: 'asc' }

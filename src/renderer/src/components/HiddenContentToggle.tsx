@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
+import { onHiddenContentPinRequired } from '../lib/ipcEvents'
 import { useHiddenContent } from '../lib/useHiddenContent'
 import PinPromptModal from './PinPromptModal'
 import { EyeIcon, EyeOffIcon } from './icons'
@@ -13,7 +14,7 @@ export default function HiddenContentToggle(): React.JSX.Element | null {
   const [pinPromptOpen, setPinPromptOpen] = useState(false)
 
   // The Preferences menu item asks the renderer to collect the PIN.
-  useEffect(() => api.onHiddenContentPinRequired(() => setPinPromptOpen(true)), [])
+  useEffect(() => onHiddenContentPinRequired(() => setPinPromptOpen(true)), [])
 
   const handleClick = async (): Promise<void> => {
     if (visible) {

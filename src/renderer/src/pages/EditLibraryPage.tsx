@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, localFileUrl } from '../lib/api'
-import { showStatus } from '../components/StatusToast'
+import { openFile } from '../lib/openFile'
+import { showError, showSuccess } from '../components/StatusToast'
 import type { LibraryWithCount, SourceWithStatus } from '../types'
+import PageMessage from '../components/PageMessage'
 
 export default function EditLibraryPage(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
@@ -61,8 +63,7 @@ export default function EditLibraryPage(): React.JSX.Element {
     setAddingSource(true)
     try {
       const result = await api.addSource(path, libraryId)
-      const dismiss = showStatus(`Imported ${result.imported}, updated ${result.updated}`)
-      setTimeout(dismiss, 3000)
+      showSuccess(`Imported ${result.imported}, updated ${result.updated}`)
       await loadSources()
     } finally {
       setAddingSource(false)
@@ -74,8 +75,7 @@ export default function EditLibraryPage(): React.JSX.Element {
     try {
       const result = await api.refreshSource(sourceId)
       if (result) {
-        const dismiss = showStatus(`Refreshed: ${result.imported} imported, ${result.updated} updated`)
-        setTimeout(dismiss, 3000)
+        showSuccess(`Refreshed: ${result.imported} imported, ${result.updated} updated`)
       }
       await loadSources()
     } finally {
@@ -90,28 +90,22 @@ export default function EditLibraryPage(): React.JSX.Element {
   }
 
   const handleUpdateSource = async (sourceId: number): Promise<void> => {
-    const success = await api.updateSourcePath(sourceId)
-    if (success) {
-      const dismiss = showStatus('Source path updated')
-      setTimeout(dismiss, 3000)
+    const result = await api.updateSourcePath(sourceId)
+    if (result.ok) {
+      showSuccess('Source path updated')
       await loadSources()
+    } else if (result.error) {
+      // Silent on cancel; anything else is a real failure worth reporting.
+      showError(result.error)
     }
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    )
+    return <PageMessage>Loading...</PageMessage>
   }
 
   if (!library) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Library not found.
-      </div>
-    )
+    return <PageMessage>Library not found.</PageMessage>
   }
 
   return (
@@ -218,7 +212,7 @@ export default function EditLibraryPage(): React.JSX.Element {
                           {source.exists && (
                             <button
                               type="button"
-                              onClick={() => api.openFile(source.path)}
+                              onClick={() => void openFile(source.path)}
                               className="shrink-0 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
                               title="Open in file explorer"
                             >

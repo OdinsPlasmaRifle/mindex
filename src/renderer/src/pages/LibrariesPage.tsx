@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { onComicsUpdated } from '../lib/ipcEvents'
 import type { LibraryWithCount } from '../types'
 import LibraryCard from '../components/LibraryCard'
 import SearchBar from '../components/SearchBar'
@@ -49,7 +50,7 @@ export default function LibrariesPage(): React.JSX.Element {
   }, [loadLibraries])
 
   useEffect(() => {
-    return api.onComicsUpdated(() => {
+    return onComicsUpdated(() => {
       loadLibraries()
     })
   }, [loadLibraries])
@@ -85,17 +86,21 @@ export default function LibrariesPage(): React.JSX.Element {
 
         <p className="text-sm text-[var(--muted-foreground)] mb-4">{libraries.length} {libraries.length === 1 ? 'library' : 'libraries'}</p>
 
-        <div className="mb-6">
-          <SearchBar value={search} onChange={handleSearch} placeholder="Search by name..." />
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <SearchBar
+            value={search}
+            onChange={handleSearch}
+            placeholder="Search by name..."
+            collapsible
+          />
+          {hiddenVisible && (
+            <>
+              {filterButton('hide', 'Exclude hidden')}
+              {filterButton('include', 'Include hidden')}
+              {filterButton('only', 'Only hidden')}
+            </>
+          )}
         </div>
-
-        {hiddenVisible && (
-          <div className="flex gap-2 mb-4">
-            {filterButton('hide', 'Exclude hidden')}
-            {filterButton('include', 'Include hidden')}
-            {filterButton('only', 'Only hidden')}
-          </div>
-        )}
 
         {libraries.length === 0 ? (
           <div className="text-center py-20 text-[var(--muted-foreground)]">
