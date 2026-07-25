@@ -2,7 +2,7 @@ import AdmZip from 'adm-zip'
 import Database from 'better-sqlite3'
 import { app, dialog, BrowserWindow } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs'
-import { extname, join } from 'path'
+import { basename, dirname, extname, join } from 'path'
 import { closeDb, getDb, getDbPath, initDb, SCHEMA_VERSION } from './db'
 
 const BACKUP_FORMAT_VERSION = 1
@@ -32,6 +32,34 @@ function coversStorageDir(): string {
   return join(app.getPath('userData'), COVERS_DIR)
 }
 
+/** Any trailing extension this app might have put on a backup name, current or legacy. */
+const BACKUP_SUFFIX_RE = /\.(mndx\.bkp|mndx|bkp|mindex)$/i
+
+/**
+ * Forces exactly one `.mndx.bkp` onto the path the save dialog returned.
+ *
+ * Native dialogs append the selected filter's extension whenever the file name
+ * does not already end in something they recognise. Because this filter is
+ * two-part, they treat a name ending in `.bkp` as not matching `mndx.bkp` and
+ * append the whole thing again — so the default name comes back as
+ * `name.mndx.bkp.mndx.bkp`. Stripping every trailing known suffix before adding
+ * one handles that, a partial extension, and a legacy `.mindex` name alike.
+ */
+function withBackupExtension(filePath: string): string {
+  const dir = dirname(filePath)
+
+  let stem = basename(filePath)
+  for (;;) {
+    const stripped = stem.replace(BACKUP_SUFFIX_RE, '')
+    if (stripped === stem) break
+    stem = stripped
+  }
+
+  // A name made up entirely of extensions (".mndx.bkp") leaves no stem to build
+  // on, so keep one suffix rather than stacking another onto it.
+  return join(dir, stem ? `${stem}.${BACKUP_EXTENSION}` : `.${BACKUP_EXTENSION}`)
+}
+
 export async function exportBackup(win: BrowserWindow): Promise<{ canceled: boolean; path?: string }> {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const defaultName = `mindex-backup-${stamp}.${BACKUP_EXTENSION}`
@@ -44,13 +72,7 @@ export async function exportBackup(win: BrowserWindow): Promise<{ canceled: bool
 
   if (result.canceled || !result.filePath) return { canceled: true }
 
-  // Native save dialogs only auto-append a single trailing extension, so a
-  // two-part one like .mndx.bkp has to be enforced here. A partial or legacy
-  // extension is replaced rather than stacked onto, so overwriting an older
-  // backup by name does not produce "name.mindex.mndx.bkp".
-  const outputPath = result.filePath.endsWith(`.${BACKUP_EXTENSION}`)
-    ? result.filePath
-    : `${result.filePath.replace(/\.(mndx|bkp|mindex)$/i, '')}.${BACKUP_EXTENSION}`
+  const outputPath = withBackupExtension(result.filePath)
 
   const db = getDb()
 

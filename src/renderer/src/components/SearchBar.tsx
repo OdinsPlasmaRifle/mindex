@@ -57,7 +57,15 @@ export default function SearchBar({
         aria-label="Search"
         className="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
       >
-        <SearchIcon />
+        {/*
+          h-5 reproduces the 20px line box that a text label would create. Without
+          it the icon alone is only 16px tall, making this button 4px shorter than
+          both its text siblings and the expanded field — so expanding the search
+          reflowed everything below it.
+        */}
+        <span className="flex items-center h-5">
+          <SearchIcon />
+        </span>
       </button>
     )
   }
