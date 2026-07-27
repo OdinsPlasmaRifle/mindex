@@ -4,7 +4,7 @@ import { join, relative } from 'path'
 
 let db: Database.Database
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 const SCHEMA = `
   CREATE TABLE schema_version (
@@ -42,6 +42,7 @@ const SCHEMA = `
     image_path TEXT,
     directory TEXT NOT NULL UNIQUE,
     favorite INTEGER NOT NULL DEFAULT 0,
+    bookmark INTEGER NOT NULL DEFAULT 0,
     library_id INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
     source_id INTEGER REFERENCES source(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -54,6 +55,7 @@ const SCHEMA = `
     directory TEXT NOT NULL,
     file TEXT,
     favorite INTEGER NOT NULL DEFAULT 0,
+    bookmark INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(comic_id, number)
   );
@@ -66,6 +68,7 @@ const SCHEMA = `
     type TEXT NOT NULL CHECK(type IN ('chapter', 'extra')),
     file TEXT NOT NULL,
     favorite INTEGER NOT NULL DEFAULT 0,
+    bookmark INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(volume_id, number, increment, type)
   );
@@ -199,6 +202,14 @@ function migrateV5toV6(): void {
   db.prepare('UPDATE schema_version SET version = 6').run()
 }
 
+/** Bookmarks are a second, independent flag alongside favourite at every level. */
+function migrateV6toV7(): void {
+  db.exec('ALTER TABLE comic ADD COLUMN bookmark INTEGER NOT NULL DEFAULT 0')
+  db.exec('ALTER TABLE volume ADD COLUMN bookmark INTEGER NOT NULL DEFAULT 0')
+  db.exec('ALTER TABLE chapter ADD COLUMN bookmark INTEGER NOT NULL DEFAULT 0')
+  db.prepare('UPDATE schema_version SET version = 7').run()
+}
+
 function migrateV3toV4(): void {
   db.exec(`
     CREATE TABLE chapter_new (
@@ -253,6 +264,9 @@ export function initDb(): void {
         }
         if (versionRow.version < 6) {
           migrateV5toV6()
+        }
+        if (versionRow.version < 7) {
+          migrateV6toV7()
         }
       })
       migrate()

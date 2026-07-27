@@ -21,7 +21,7 @@ declare global {
       onComicsUpdated(callback: () => void): () => void
       onImportStarted(callback: () => void): () => void
       onImportFinished(callback: () => void): () => void
-      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean, includedTagIds?: number[], excludedTagIds?: number[], sortBy?: ComicSortBy, sortDir?: SortDir): Promise<ComicsPage>
+      getComics(libraryId: number, page: number, search: string, pageSize?: number, favoritesOnly?: boolean, bookmarksOnly?: boolean, includedTagIds?: number[], excludedTagIds?: number[], sortBy?: ComicSortBy, sortDir?: SortDir): Promise<ComicsPage>
       getRandomComic(libraryId: number): Promise<{ id: number } | null>
       getComic(id: number): Promise<ComicWithVolumes | null>
       getVolume(id: number): Promise<VolumeWithChapters | null>
@@ -30,6 +30,9 @@ declare global {
       toggleFavorite(id: number): Promise<boolean | null>
       toggleVolumeFavorite(id: number): Promise<boolean | null>
       toggleChapterFavorite(id: number): Promise<boolean | null>
+      toggleBookmark(id: number): Promise<boolean | null>
+      toggleVolumeBookmark(id: number): Promise<boolean | null>
+      toggleChapterBookmark(id: number): Promise<boolean | null>
       openFile(filePath: string): Promise<{ success?: boolean; error?: string }>
       onHiddenContentToggled(callback: (enabled: boolean) => void): () => void
       getHiddenContentEnabled(): Promise<boolean>

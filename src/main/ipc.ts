@@ -9,7 +9,7 @@ import {
   getComics,
   getRandomComicId,
   getVolume,
-  toggleFavorite
+  toggleFlag
 } from './comics'
 import {
   broadcastHiddenContentState,
@@ -65,6 +65,7 @@ function registerComicHandlers(): void {
       search: string,
       pageSize: number = 20,
       favoritesOnly: boolean = false,
+      bookmarksOnly: boolean = false,
       includedTagIds: number[] = [],
       excludedTagIds: number[] = [],
       sortBy: string = 'name',
@@ -76,6 +77,7 @@ function registerComicHandlers(): void {
         search,
         pageSize,
         favoritesOnly,
+        bookmarksOnly,
         includedTagIds,
         excludedTagIds,
         sortBy,
@@ -97,9 +99,13 @@ function registerComicHandlers(): void {
     return deleted
   })
 
-  ipcMain.handle('toggle-favorite', (_event, id: number) => toggleFavorite('comic', id))
-  ipcMain.handle('toggle-volume-favorite', (_event, id: number) => toggleFavorite('volume', id))
-  ipcMain.handle('toggle-chapter-favorite', (_event, id: number) => toggleFavorite('chapter', id))
+  ipcMain.handle('toggle-favorite', (_event, id: number) => toggleFlag('comic', 'favorite', id))
+  ipcMain.handle('toggle-volume-favorite', (_event, id: number) => toggleFlag('volume', 'favorite', id))
+  ipcMain.handle('toggle-chapter-favorite', (_event, id: number) => toggleFlag('chapter', 'favorite', id))
+
+  ipcMain.handle('toggle-bookmark', (_event, id: number) => toggleFlag('comic', 'bookmark', id))
+  ipcMain.handle('toggle-volume-bookmark', (_event, id: number) => toggleFlag('volume', 'bookmark', id))
+  ipcMain.handle('toggle-chapter-bookmark', (_event, id: number) => toggleFlag('chapter', 'bookmark', id))
 
   ipcMain.handle('open-file', async (_event, filePath: string) => {
     if (!filePath) return { error: 'No file path recorded — try refreshing the comic.' }

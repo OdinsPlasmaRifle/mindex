@@ -9,7 +9,7 @@ import SearchBar from '../components/SearchBar'
 import SortMenu from '../components/SortMenu'
 import Pagination from '../components/Pagination'
 import TagFilterPool from '../components/TagFilterPool'
-import { CogIcon, HeartIcon, HiddenIcon, ShuffleIcon, TagIcon } from '../components/icons'
+import { BookmarkIcon, CogIcon, HeartIcon, HiddenIcon, ShuffleIcon, TagIcon } from '../components/icons'
 
 const PAGE_SIZE = 20
 
@@ -17,6 +17,7 @@ interface ViewState {
   page: number
   search: string
   favoritesOnly: boolean
+  bookmarksOnly: boolean
   tagFilters: Record<number, TagFilterState>
   tagsPanelOpen: boolean
   sort: ComicSort
@@ -26,6 +27,7 @@ const DEFAULT_VIEW: ViewState = {
   page: 1,
   search: '',
   favoritesOnly: false,
+  bookmarksOnly: false,
   tagFilters: {},
   tagsPanelOpen: false,
   sort: DEFAULT_COMIC_SORT
@@ -49,6 +51,7 @@ export default function LibraryComicsPage(): React.JSX.Element {
   const [page, setPage] = useState(saved.page)
   const [search, setSearch] = useState(saved.search)
   const [favoritesOnly, setFavoritesOnly] = useState(saved.favoritesOnly)
+  const [bookmarksOnly, setBookmarksOnly] = useState(saved.bookmarksOnly)
   const [tagFilters, setTagFilters] = useState<Record<number, TagFilterState>>(saved.tagFilters)
   const [tagsPanelOpen, setTagsPanelOpen] = useState(saved.tagsPanelOpen)
   const [sort, setSort] = useState<ComicSort>(saved.sort)
@@ -60,8 +63,8 @@ export default function LibraryComicsPage(): React.JSX.Element {
   }, [libraryId])
 
   useEffect(() => {
-    savedViews[libraryId] = { page, search, favoritesOnly, tagFilters, tagsPanelOpen, sort }
-  }, [libraryId, page, search, favoritesOnly, tagFilters, tagsPanelOpen, sort])
+    savedViews[libraryId] = { page, search, favoritesOnly, bookmarksOnly, tagFilters, tagsPanelOpen, sort }
+  }, [libraryId, page, search, favoritesOnly, bookmarksOnly, tagFilters, tagsPanelOpen, sort])
 
   const loadComics = useCallback(async () => {
     const included = Object.entries(tagFilters)
@@ -76,6 +79,7 @@ export default function LibraryComicsPage(): React.JSX.Element {
       search,
       PAGE_SIZE,
       favoritesOnly,
+      bookmarksOnly,
       included,
       excluded,
       sort.by,
@@ -83,7 +87,7 @@ export default function LibraryComicsPage(): React.JSX.Element {
     )
     setComics(result.comics)
     setTotal(result.total)
-  }, [libraryId, page, search, favoritesOnly, tagFilters, sort])
+  }, [libraryId, page, search, favoritesOnly, bookmarksOnly, tagFilters, sort])
 
   useEffect(() => {
     loadComics()
@@ -107,6 +111,12 @@ export default function LibraryComicsPage(): React.JSX.Element {
     )
   }, [])
 
+  const handleBookmarkToggle = useCallback((id: number, bookmark: boolean) => {
+    setComics((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, bookmark: bookmark ? 1 : 0 } : c))
+    )
+  }, [])
+
   const handleSearch = useCallback((value: string) => {
     setSearch(value)
     setPage(1)
@@ -114,6 +124,11 @@ export default function LibraryComicsPage(): React.JSX.Element {
 
   const handleToggleFavorites = (): void => {
     setFavoritesOnly((prev) => !prev)
+    setPage(1)
+  }
+
+  const handleToggleBookmarks = (): void => {
+    setBookmarksOnly((prev) => !prev)
     setPage(1)
   }
 
@@ -186,6 +201,18 @@ export default function LibraryComicsPage(): React.JSX.Element {
             Favourites
           </button>
           <button
+            onClick={handleToggleBookmarks}
+            aria-pressed={bookmarksOnly}
+            className={`flex items-center gap-1.5 px-3 py-1 text-sm rounded border transition-colors ${
+              bookmarksOnly
+                ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]'
+                : 'border-[var(--border)] hover:bg-[var(--secondary)]'
+            }`}
+          >
+            <BookmarkIcon filled={bookmarksOnly} />
+            Bookmarks
+          </button>
+          <button
             onClick={handleRandom}
             className="flex items-center gap-1.5 px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
           >
@@ -224,15 +251,19 @@ export default function LibraryComicsPage(): React.JSX.Element {
           <div className="text-center py-20 text-[var(--muted-foreground)]">
             {search
               ? 'No comics found matching your search.'
-              : favoritesOnly
-                ? 'No favourited comics in this library.'
-                : 'No comics in this library yet. Edit this library to add sources.'}
+              : favoritesOnly && bookmarksOnly
+                ? 'No comics in this library are both favourited and bookmarked.'
+                : favoritesOnly
+                  ? 'No favourited comics in this library.'
+                  : bookmarksOnly
+                    ? 'No bookmarked comics in this library.'
+                    : 'No comics in this library yet. Edit this library to add sources.'}
           </div>
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
               {comics.map((comic) => (
-                <ComicCard key={comic.id} comic={comic} onFavoriteToggle={handleFavoriteToggle} sourceMissing={isComicSourceMissing(comic)} libraryId={libraryId} />
+                <ComicCard key={comic.id} comic={comic} onFavoriteToggle={handleFavoriteToggle} onBookmarkToggle={handleBookmarkToggle} sourceMissing={isComicSourceMissing(comic)} libraryId={libraryId} />
               ))}
             </div>
             <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />

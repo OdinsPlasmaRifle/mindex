@@ -19,6 +19,7 @@ export interface Comic {
   image_path: string | null
   directory: string
   favorite: number
+  bookmark: number
   library_id: number
   created_at: string
 }
@@ -30,6 +31,7 @@ export interface Volume {
   directory: string
   file: string | null
   favorite: number
+  bookmark: number
   created_at: string
 }
 
@@ -41,6 +43,7 @@ export interface Chapter {
   type: 'chapter' | 'extra'
   file: string
   favorite: number
+  bookmark: number
   created_at: string
 }
 

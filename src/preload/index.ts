@@ -25,6 +25,7 @@ const api = {
     search: string,
     pageSize?: number,
     favoritesOnly?: boolean,
+    bookmarksOnly?: boolean,
     includedTagIds?: number[],
     excludedTagIds?: number[],
     sortBy?: string,
@@ -37,6 +38,7 @@ const api = {
       image_path: string | null
       directory: string
       favorite: number
+      bookmark: number
       library_id: number
       created_at: string
     }>
@@ -51,6 +53,7 @@ const api = {
       search,
       pageSize,
       favoritesOnly,
+      bookmarksOnly,
       includedTagIds,
       excludedTagIds,
       sortBy,
@@ -116,6 +119,7 @@ const api = {
     image_path: string | null
     directory: string
     favorite: number
+    bookmark: number
     library_id: number
     library_is_hidden: number
     created_at: string
@@ -126,6 +130,7 @@ const api = {
       directory: string
       file: string | null
       favorite: number
+      bookmark: number
       created_at: string
       chapters: Array<{
         id: number
@@ -134,6 +139,7 @@ const api = {
         type: 'chapter' | 'extra'
         file: string
         favorite: number
+        bookmark: number
         created_at: string
       }>
     }>
@@ -148,6 +154,7 @@ const api = {
     directory: string
     file: string | null
     favorite: number
+    bookmark: number
     library_is_hidden: number
     created_at: string
     chapters: Array<{
@@ -157,6 +164,7 @@ const api = {
       type: 'chapter' | 'extra'
       file: string
       favorite: number
+      bookmark: number
       created_at: string
     }>
   } | null> => ipcRenderer.invoke('get-volume', id),
@@ -175,6 +183,15 @@ const api = {
 
   toggleChapterFavorite: (id: number): Promise<boolean | null> =>
     ipcRenderer.invoke('toggle-chapter-favorite', id),
+
+  toggleBookmark: (id: number): Promise<boolean | null> =>
+    ipcRenderer.invoke('toggle-bookmark', id),
+
+  toggleVolumeBookmark: (id: number): Promise<boolean | null> =>
+    ipcRenderer.invoke('toggle-volume-bookmark', id),
+
+  toggleChapterBookmark: (id: number): Promise<boolean | null> =>
+    ipcRenderer.invoke('toggle-chapter-bookmark', id),
 
   openFile: (filePath: string): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('open-file', filePath),

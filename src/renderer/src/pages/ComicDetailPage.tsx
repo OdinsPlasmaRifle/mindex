@@ -5,7 +5,15 @@ import { openFile } from '../lib/openFile'
 import ImageLightbox from '../components/ImageLightbox'
 import TagPool from '../components/TagPool'
 import type { ComicWithVolumes, VolumeWithChapters } from '../types'
-import { ChevronDownIcon, CogIcon, HeartIcon, HeartToggle, ShuffleIcon } from '../components/icons'
+import {
+  BookmarkIcon,
+  BookmarkToggle,
+  ChevronDownIcon,
+  CogIcon,
+  HeartIcon,
+  HeartToggle,
+  ShuffleIcon
+} from '../components/icons'
 import PageMessage from '../components/PageMessage'
 
 function VolumeAccordion({
@@ -23,8 +31,12 @@ function VolumeAccordion({
 }): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
   const [volFavorite, setVolFavorite] = useState(vol.favorite)
+  const [volBookmark, setVolBookmark] = useState(vol.bookmark)
   const [chapterFavorites, setChapterFavorites] = useState<Record<number, number>>(
     () => Object.fromEntries(vol.chapters.map((ch) => [ch.id, ch.favorite]))
+  )
+  const [chapterBookmarks, setChapterBookmarks] = useState<Record<number, number>>(
+    () => Object.fromEntries(vol.chapters.map((ch) => [ch.id, ch.bookmark]))
   )
 
   const chapters = vol.chapters.filter((c) => c.type === 'chapter')
@@ -49,6 +61,18 @@ function VolumeAccordion({
     e.stopPropagation()
     const result = await api.toggleChapterFavorite(chId)
     if (result !== null) setChapterFavorites((prev) => ({ ...prev, [chId]: result ? 1 : 0 }))
+  }
+
+  const handleToggleVolBookmark = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleVolumeBookmark(vol.id)
+    if (result !== null) setVolBookmark(result ? 1 : 0)
+  }
+
+  const handleToggleChBookmark = async (e: React.MouseEvent, chId: number): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleChapterBookmark(chId)
+    if (result !== null) setChapterBookmarks((prev) => ({ ...prev, [chId]: result ? 1 : 0 }))
   }
 
   return (
@@ -77,6 +101,7 @@ function VolumeAccordion({
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          <BookmarkToggle filled={volBookmark === 1} onClick={handleToggleVolBookmark} />
           <HeartToggle filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           {vol.file && (
             <span
@@ -120,6 +145,7 @@ function VolumeAccordion({
                       <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      <BookmarkToggle filled={chapterBookmarks[ch.id] === 1} onClick={(e) => handleToggleChBookmark(e, ch.id)} />
                       <HeartToggle filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                       <button
                         onClick={() => handleOpenChapter(ch.id, ch.file)}
@@ -156,6 +182,7 @@ function VolumeAccordion({
                       <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={libraryIsHidden} />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      <BookmarkToggle filled={chapterBookmarks[ex.id] === 1} onClick={(e) => handleToggleChBookmark(e, ex.id)} />
                       <HeartToggle filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                       <button
                         onClick={() => handleOpenChapter(ex.id, ex.file)}
@@ -238,6 +265,14 @@ export default function ComicDetailPage(): React.JSX.Element {
     }
   }
 
+  const handleToggleBookmark = async (): Promise<void> => {
+    if (!comic) return
+    const result = await api.toggleBookmark(comic.id)
+    if (result !== null) {
+      setComic({ ...comic, bookmark: result ? 1 : 0 })
+    }
+  }
+
   if (loading) {
     return <PageMessage>Loading...</PageMessage>
   }
@@ -307,6 +342,13 @@ export default function ComicDetailPage(): React.JSX.Element {
               >
                 <HeartIcon className="w-4 h-4 inline-block mr-1 -mt-0.5" filled={comic.favorite === 1} />
                 {comic.favorite ? 'Remove from favorites' : 'Add to favorites'}
+              </button>
+              <button
+                onClick={handleToggleBookmark}
+                className="px-3 py-1 text-sm rounded border border-[var(--border)] hover:bg-[var(--secondary)] transition-colors"
+              >
+                <BookmarkIcon className="w-4 h-4 inline-block mr-1 -mt-0.5" filled={comic.bookmark === 1} />
+                {comic.bookmark ? 'Remove bookmark' : 'Bookmark'}
               </button>
               <button
                 onClick={() => navigate(`/comic/${comic.id}/edit`)}

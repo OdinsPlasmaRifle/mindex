@@ -321,7 +321,7 @@ export default function SettingsPage(): React.JSX.Element {
         <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)] mb-3">
           <h3 className="text-sm font-medium mb-1">Backup</h3>
           <p className="text-sm text-[var(--muted-foreground)] mb-3">
-            Export all libraries, comics, tags, favorites, settings, and library cover images into a single <span className="font-mono">.mndx.bkp</span> file. Source manga files on disk are not included.
+            Export all libraries, comics, tags, favorites, bookmarks, settings, and library cover images into a single <span className="font-mono">.mndx.bkp</span> file. Source manga files on disk are not included.
           </p>
           <div className="flex items-center gap-2">
             <button

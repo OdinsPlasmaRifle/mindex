@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { openFile } from '../lib/openFile'
 import TagPool from '../components/TagPool'
 import type { VolumeWithChapters } from '../types'
-import { HeartToggle } from '../components/icons'
+import { BookmarkToggle, HeartToggle } from '../components/icons'
 import PageMessage from '../components/PageMessage'
 
 export default function VolumePage(): React.JSX.Element {
@@ -12,7 +12,9 @@ export default function VolumePage(): React.JSX.Element {
   const [volume, setVolume] = useState<VolumeWithChapters | null>(null)
   const [loading, setLoading] = useState(true)
   const [volFavorite, setVolFavorite] = useState(0)
+  const [volBookmark, setVolBookmark] = useState(0)
   const [chapterFavorites, setChapterFavorites] = useState<Record<number, number>>({})
+  const [chapterBookmarks, setChapterBookmarks] = useState<Record<number, number>>({})
 
   useEffect(() => {
     if (!id) return
@@ -20,7 +22,9 @@ export default function VolumePage(): React.JSX.Element {
       setVolume(result)
       if (result) {
         setVolFavorite(result.favorite)
+        setVolBookmark(result.bookmark)
         setChapterFavorites(Object.fromEntries(result.chapters.map((ch) => [ch.id, ch.favorite])))
+        setChapterBookmarks(Object.fromEntries(result.chapters.map((ch) => [ch.id, ch.bookmark])))
       }
       setLoading(false)
     })
@@ -53,6 +57,18 @@ export default function VolumePage(): React.JSX.Element {
     if (result !== null) setChapterFavorites((prev) => ({ ...prev, [chId]: result ? 1 : 0 }))
   }
 
+  const handleToggleVolBookmark = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleVolumeBookmark(volume.id)
+    if (result !== null) setVolBookmark(result ? 1 : 0)
+  }
+
+  const handleToggleChBookmark = async (e: React.MouseEvent, chId: number): Promise<void> => {
+    e.stopPropagation()
+    const result = await api.toggleChapterBookmark(chId)
+    if (result !== null) setChapterBookmarks((prev) => ({ ...prev, [chId]: result ? 1 : 0 }))
+  }
+
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-4xl mx-auto">
@@ -74,6 +90,7 @@ export default function VolumePage(): React.JSX.Element {
                 Read Full Volume
               </button>
             )}
+            <BookmarkToggle filled={volBookmark === 1} onClick={handleToggleVolBookmark} />
             <HeartToggle filled={volFavorite === 1} onClick={handleToggleVolFavorite} />
           </div>
           <div className="mt-3">
@@ -95,6 +112,7 @@ export default function VolumePage(): React.JSX.Element {
                     <TagPool level="chapter" entityId={ch.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <BookmarkToggle filled={chapterBookmarks[ch.id] === 1} onClick={(e) => handleToggleChBookmark(e, ch.id)} />
                     <HeartToggle filled={chapterFavorites[ch.id] === 1} onClick={(e) => handleToggleChFavorite(e, ch.id)} />
                     <button
                       onClick={() => handleOpen(ch.file)}
@@ -123,6 +141,7 @@ export default function VolumePage(): React.JSX.Element {
                     <TagPool level="chapter" entityId={ex.id} resource="comics" size="compact" libraryIsHidden={volume.library_is_hidden === 1} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <BookmarkToggle filled={chapterBookmarks[ex.id] === 1} onClick={(e) => handleToggleChBookmark(e, ex.id)} />
                     <HeartToggle filled={chapterFavorites[ex.id] === 1} onClick={(e) => handleToggleChFavorite(e, ex.id)} />
                     <button
                       onClick={() => handleOpen(ex.file)}

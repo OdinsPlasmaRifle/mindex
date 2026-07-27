@@ -15,6 +15,17 @@ const TAG_VISIBLE_SQL = `(
   OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id JOIN chapter_tag cht ON cht.chapter_id = ch.id WHERE v.comic_id = c.id AND cht.tag_id = ?)
 )`
 
+/**
+ * True when a bookmark is set anywhere under a comic. A bookmark marks a stop
+ * point, which is usually a chapter rather than the comic itself, so filtering
+ * on `c.bookmark` alone would hide the comics the user actually wants to find.
+ */
+const BOOKMARK_VISIBLE_SQL = `(
+  c.bookmark = 1
+  OR EXISTS (SELECT 1 FROM volume v WHERE v.comic_id = c.id AND v.bookmark = 1)
+  OR EXISTS (SELECT 1 FROM volume v JOIN chapter ch ON ch.volume_id = v.id WHERE v.comic_id = c.id AND ch.bookmark = 1)
+)`
+
 // Sort keys are interpolated into SQL, so they are resolved through this
 // whitelist rather than taken from the renderer verbatim. Every key ends with a
 // unique tie-break so paging stays stable when values collide — created_at only
@@ -67,6 +78,7 @@ export interface GetComicsOptions {
   search: string
   pageSize: number
   favoritesOnly: boolean
+  bookmarksOnly: boolean
   includedTagIds: number[]
   excludedTagIds: number[]
   sortBy: string
@@ -80,7 +92,7 @@ export function getComics(opts: GetComicsOptions): {
   pageSize: number
 } {
   const db = getDb()
-  const { libraryId, page, pageSize, search, favoritesOnly } = opts
+  const { libraryId, page, pageSize, search, favoritesOnly, bookmarksOnly } = opts
   const offset = (page - 1) * pageSize
 
   const conditions: string[] = ['c.library_id = ?']
@@ -93,6 +105,8 @@ export function getComics(opts: GetComicsOptions): {
   }
 
   if (favoritesOnly) conditions.push('c.favorite = 1')
+
+  if (bookmarksOnly) conditions.push(BOOKMARK_VISIBLE_SQL)
 
   for (const tagId of opts.includedTagIds) {
     conditions.push(TAG_VISIBLE_SQL)
@@ -178,24 +192,27 @@ export function deleteComic(id: number): boolean {
   return getDb().prepare('DELETE FROM comic WHERE id = ?').run(id).changes > 0
 }
 
-export type FavoritableTable = 'comic' | 'volume' | 'chapter'
+export type FlaggableTable = 'comic' | 'volume' | 'chapter'
+/** Independent per-row markers: a favourite is a rating, a bookmark is a stop point. */
+export type RowFlag = 'favorite' | 'bookmark'
 
-const FAVORITABLE_TABLES: readonly FavoritableTable[] = ['comic', 'volume', 'chapter']
+const FLAGGABLE_TABLES: readonly FlaggableTable[] = ['comic', 'volume', 'chapter']
+const ROW_FLAGS: readonly RowFlag[] = ['favorite', 'bookmark']
 
 /**
- * Flips the favourite flag on a comic, volume or chapter and returns the new
- * value, or null when the row does not exist. The table name reaches SQL by
- * interpolation, so it is re-checked at runtime rather than trusted from the
- * type alone.
+ * Flips a favourite or bookmark flag on a comic, volume or chapter and returns
+ * the new value, or null when the row does not exist. Both the table and column
+ * names reach SQL by interpolation, so they are re-checked at runtime rather
+ * than trusted from the types alone.
  */
-export function toggleFavorite(table: FavoritableTable, id: number): boolean | null {
-  if (!FAVORITABLE_TABLES.includes(table)) return null
+export function toggleFlag(table: FlaggableTable, flag: RowFlag, id: number): boolean | null {
+  if (!FLAGGABLE_TABLES.includes(table) || !ROW_FLAGS.includes(flag)) return null
   const db = getDb()
-  const row = db.prepare(`SELECT favorite FROM ${table} WHERE id = ?`).get(id) as
-    | { favorite: number }
+  const row = db.prepare(`SELECT ${flag} as value FROM ${table} WHERE id = ?`).get(id) as
+    | { value: number }
     | undefined
   if (!row) return null
-  const next = row.favorite ? 0 : 1
-  db.prepare(`UPDATE ${table} SET favorite = ? WHERE id = ?`).run(next, id)
+  const next = row.value ? 0 : 1
+  db.prepare(`UPDATE ${table} SET ${flag} = ? WHERE id = ?`).run(next, id)
   return next === 1
 }

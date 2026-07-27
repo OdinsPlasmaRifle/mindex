@@ -23,6 +23,7 @@ export default function EditLibraryPage(): React.JSX.Element {
   const [clearingSourceId, setClearingSourceId] = useState<number | null>(null)
   const [addingSource, setAddingSource] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [confirmDeleteText, setConfirmDeleteText] = useState('')
   const [deleting, setDeleting] = useState(false)
 
   const loadSources = async (): Promise<void> => {
@@ -310,31 +311,43 @@ export default function EditLibraryPage(): React.JSX.Element {
             This action cannot be undone.
           </p>
           {confirmingDelete ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-[var(--muted-foreground)]">Are you sure?</span>
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={async () => {
-                  setDeleting(true)
-                  try {
-                    await api.deleteLibrary(libraryId)
-                    navigate('/')
-                  } finally {
-                    setDeleting(false)
-                  }
-                }}
-                className="px-3 py-1 text-sm rounded-md bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
-              >
-                {deleting ? 'Deleting...' : 'Confirm'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-                className="px-3 py-1 text-sm rounded-md bg-[var(--secondary)] hover:bg-[var(--secondary)]/80 transition-colors"
-              >
-                Cancel
-              </button>
+            <div className="space-y-3">
+              <p className="text-sm text-red-400">
+                Type <span className="font-mono font-semibold">DELETE</span> to confirm:
+              </p>
+              <input
+                type="text"
+                value={confirmDeleteText}
+                onChange={(e) => setConfirmDeleteText(e.target.value)}
+                className="w-48 px-3 py-1.5 text-sm rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="DELETE"
+                autoFocus
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={deleting || confirmDeleteText !== 'DELETE'}
+                  onClick={async () => {
+                    setDeleting(true)
+                    try {
+                      await api.deleteLibrary(libraryId)
+                      navigate('/')
+                    } finally {
+                      setDeleting(false)
+                    }
+                  }}
+                  className="px-3 py-1.5 text-sm rounded-md bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                >
+                  {deleting ? 'Deleting...' : 'Confirm'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setConfirmingDelete(false); setConfirmDeleteText('') }}
+                  className="px-3 py-1.5 text-sm rounded-md bg-[var(--secondary)] hover:bg-[var(--secondary)]/80 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           ) : (
             <button

@@ -33,6 +33,7 @@ const EYE = 'M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.6
 const EYE_PUPIL = 'M15 12a3 3 0 11-6 0 3 3 0 016 0z'
 const EYE_OFF = 'M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88'
 const HEART = 'M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z'
+const BOOKMARK = 'M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z'
 const TAG = 'M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z'
 const TAG_DOT = 'M6 6h.008v.008H6V6z'
 const SHUFFLE = 'M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3'
@@ -69,17 +70,21 @@ export function HiddenIcon({ className = 'w-3.5 h-3.5' }: IconProps): React.JSX.
   return <EyeOffIcon className={className} />
 }
 
-export function HeartIcon({
-  className = 'w-4 h-4',
-  filled = false,
-  fillColor = 'currentColor',
-  stroke = 'currentColor'
-}: IconProps & {
+interface FillableIconProps extends IconProps {
   filled?: boolean
   /** Colour used when `filled`; defaults to the inherited text colour. */
   fillColor?: string
   stroke?: string
-}): React.JSX.Element {
+}
+
+/** Shared body for the icons that render hollow or solid depending on state. */
+function FillableIcon({
+  d,
+  className,
+  filled = false,
+  fillColor = 'currentColor',
+  stroke = 'currentColor'
+}: FillableIconProps & { d: string }): React.JSX.Element {
   return (
     <svg
       className={className}
@@ -89,9 +94,23 @@ export function HeartIcon({
       strokeWidth={2}
       aria-hidden="true"
     >
-      <Path d={HEART} />
+      <Path d={d} />
     </svg>
   )
+}
+
+export function HeartIcon({
+  className = 'w-4 h-4',
+  ...props
+}: FillableIconProps): React.JSX.Element {
+  return <FillableIcon d={HEART} className={className} {...props} />
+}
+
+export function BookmarkIcon({
+  className = 'w-4 h-4',
+  ...props
+}: FillableIconProps): React.JSX.Element {
+  return <FillableIcon d={BOOKMARK} className={className} {...props} />
 }
 
 export function TagIcon({ className = 'w-4 h-4' }: IconProps): React.JSX.Element {
@@ -206,16 +225,18 @@ export function CogIcon({ className = 'w-5 h-5' }: IconProps): React.JSX.Element
   )
 }
 
+interface ToggleProps {
+  filled: boolean
+  onClick: (e: React.MouseEvent) => void
+  className?: string
+}
+
 /** Heart rendered as a clickable favourite toggle; shared by the comic and volume pages. */
 export function HeartToggle({
   filled,
   onClick,
   className = 'w-4 h-4'
-}: {
-  filled: boolean
-  onClick: (e: React.MouseEvent) => void
-  className?: string
-}): React.JSX.Element {
+}: ToggleProps): React.JSX.Element {
   return (
     <button
       type="button"
@@ -225,6 +246,25 @@ export function HeartToggle({
       className="text-current hover:opacity-75 transition-opacity cursor-pointer"
     >
       <HeartIcon className={className} filled={filled} />
+    </button>
+  )
+}
+
+/** Bookmark counterpart to `HeartToggle`, for marking a stop point. */
+export function BookmarkToggle({
+  filled,
+  onClick,
+  className = 'w-4 h-4'
+}: ToggleProps): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={filled}
+      aria-label={filled ? 'Remove bookmark' : 'Add bookmark'}
+      className="text-current hover:opacity-75 transition-opacity cursor-pointer"
+    >
+      <BookmarkIcon className={className} filled={filled} />
     </button>
   )
 }

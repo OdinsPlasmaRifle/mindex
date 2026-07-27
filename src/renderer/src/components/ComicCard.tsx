@@ -1,16 +1,17 @@
 import { Link } from 'react-router-dom'
 import { api, localFileUrl } from '../lib/api'
 import type { Comic } from '../types'
-import { HeartIcon, WarningIcon } from './icons'
+import { BookmarkIcon, HeartIcon, WarningIcon } from './icons'
 
 interface ComicCardProps {
   comic: Comic
   onFavoriteToggle: (id: number, favorite: boolean) => void
+  onBookmarkToggle: (id: number, bookmark: boolean) => void
   sourceMissing?: boolean
   libraryId?: number
 }
 
-export default function ComicCard({ comic, onFavoriteToggle, sourceMissing, libraryId }: ComicCardProps): React.JSX.Element {
+export default function ComicCard({ comic, onFavoriteToggle, onBookmarkToggle, sourceMissing, libraryId }: ComicCardProps): React.JSX.Element {
   const handleToggleFavorite = async (e: React.MouseEvent): Promise<void> => {
     e.preventDefault()
     e.stopPropagation()
@@ -18,6 +19,16 @@ export default function ComicCard({ comic, onFavoriteToggle, sourceMissing, libr
     const result = await api.toggleFavorite(comic.id)
     if (result !== null) {
       onFavoriteToggle(comic.id, result)
+    }
+  }
+
+  const handleToggleBookmark = async (e: React.MouseEvent): Promise<void> => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (sourceMissing) return
+    const result = await api.toggleBookmark(comic.id)
+    if (result !== null) {
+      onBookmarkToggle(comic.id, result)
     }
   }
 
@@ -54,11 +65,21 @@ export default function ComicCard({ comic, onFavoriteToggle, sourceMissing, libr
             </div>
           )}
           <button
-            onClick={handleToggleFavorite}
+            onClick={handleToggleBookmark}
+            aria-pressed={comic.bookmark === 1}
+            aria-label={comic.bookmark === 1 ? 'Remove bookmark' : 'Add bookmark'}
             className={`w-8 h-8 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 transition-colors${sourceMissing ? ' pointer-events-none opacity-50' : ''}`}
           >
-          <HeartIcon filled={comic.favorite === 1} fillColor="#f43f5e" stroke="white" />
-        </button>
+            <BookmarkIcon filled={comic.bookmark === 1} fillColor="#38bdf8" stroke="white" />
+          </button>
+          <button
+            onClick={handleToggleFavorite}
+            aria-pressed={comic.favorite === 1}
+            aria-label={comic.favorite === 1 ? 'Remove from favourites' : 'Add to favourites'}
+            className={`w-8 h-8 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 transition-colors${sourceMissing ? ' pointer-events-none opacity-50' : ''}`}
+          >
+            <HeartIcon filled={comic.favorite === 1} fillColor="#f43f5e" stroke="white" />
+          </button>
         </div>
       </div>
       <div className="p-3">
